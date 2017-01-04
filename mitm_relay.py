@@ -18,7 +18,7 @@ BIND_WEBSERVER = ('127.0.0.1', 49999)
 BUFSIZE = 4096
 
 __prog_name__ = 'mitm_relay'
-__version__ = 0.1
+__version__ = 0.2
 
 def main():
 	parser = argparse.ArgumentParser(description='%s version %.2f' % (__prog_name__, __version__))
@@ -35,7 +35,7 @@ def main():
 		nargs='+',
 		metavar='<relay>',
 		dest='relays',
-		help='Create new relays. Several relays can be created at once. Format: -r lport:rhost:rport [lport:rhost:rport ...]',
+		help='Create new relays. Several relays can be created at once. Format: -r lport:rhost:rport [-r lport:rhost:rport ...]',
 		required=True)
 
 	parser.add_argument('-p', '--proxy',
@@ -130,6 +130,50 @@ def start_ws():
 def color(txt, code = 1, modifier = 0):
   return "\033[%d;3%dm%s\033[0m" % (modifier, code, txt)
 
+def data_repr(data):
+
+	def hexdump(src, l=0x10):
+		res = []
+		sep = '.'
+		src = str(src)
+
+		for i in range(0, len(src), l):
+			s = src[i:i+l]
+			hexa = ''
+
+			for h in range(0,len(s)):
+				if h == l/2:
+					hexa += ' '
+				h = s[h]
+				if not isinstance(h, int):
+					h = ord(h)
+				h = hex(h).replace('0x','')
+				if len(h) == 1:
+					h = '0'+h
+				hexa += h + ' '
+
+			hexa = hexa.strip()
+			text = ''
+
+			for c in s:
+				if not isinstance(c, int):
+					c = ord(c)
+
+				if 0x20 <= c < 0x7F:
+					text += chr(c)
+				else:
+					text += sep
+
+			res.append(('%08X:  %-'+str(l*(2+1)+1)+'s  |%s|') % (i, hexa, text))
+
+		return '\n'.join(res)
+
+	if all(c in string.printable for c in data):
+		return data
+
+	else:
+		return '\n'+hexdump(data)
+
 # STARTTLS interception code based on:
 # https://github.com/ipopov/starttls-mitm
 
@@ -143,52 +187,57 @@ def do_relay(client_sock, server_sock, cfg):
   headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
 
   while True:
-	#try:
 
-		# Peek for the beginnings of an ssl handshake
-		try:
-			packet = client_sock.recv(BUFSIZE, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+	# Peek for the beginnings of an ssl handshake
+	try:
+		packet = client_sock.recv(BUFSIZE, socket.MSG_PEEK | socket.MSG_DONTWAIT)
 
-			if packet.startswith('\x16\x03'): # SSL/TLS Handshake.
+		if packet.startswith('\x16\x03'): # SSL/TLS Handshake.
 
-				print color('------------------ Wrapping sockets ------------------', 2)
-				client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
-				server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
-	 
-		except:
-			pass
-	  
-		receiving, _, _ = select([client_sock, server_sock], [], [])
+			print color('------------------ Wrapping sockets ------------------', 2)
+			client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
+			server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
+ 
+	except:
+		pass
 
-		if client_sock in receiving:
-			data_out = client_sock.recv(BUFSIZE)
+	receiving, _, _ = select([client_sock, server_sock], [], [])
 
-			# Modify traffic here
-			# Send to your own parser function etc, example:
-			# data_out = data_out.replace('hello world', 'goodbye world')
+	if client_sock in receiving:
+		data_out = client_sock.recv(BUFSIZE)
 
-			# or send out to our echo-back webserver through proxy for modification:
-			if cfg.proxy:
-				data_out = requests.post('http://%s/CLIENT_REQUEST/to/%s' % (ws, remote), proxies={'http': cfg.proxy}, headers=headers, data=data_out).content
+		if not len(data_out): # client closed connection
+			print "[+] Client disconnected", client_sock.getpeername()
+			client_sock.close()
+			server_sock.close()
+			break
 
-			console_log = data_out if all(c in string.printable for c in data_out) else repr(data_out)
-			print "C >> S", color('[port %d]' % rport, 4), len(data_out), color(console_log, 3, 1), "\n"
-			server_sock.send(data_out)
+		# Modify traffic here
+		# Send to your own parser function etc, example:
+		# data_out = data_out.replace('hello world', 'goodbye world')
 
-	 	if server_sock in receiving:
-			data_in = server_sock.recv(BUFSIZE)
+		# or send out to our echo-back webserver through proxy for modification:
+		if cfg.proxy:
+			data_out = requests.post('http://%s/CLIENT_REQUEST/to/%s' % (ws, remote), proxies={'http': cfg.proxy}, headers=headers, data=data_out).content
 
-			# Modify traffic here (see example above)
-			if cfg.proxy:
-				data_in = requests.post('http://%s/SERVER_RESPONSE/from/%s' % (ws, remote), proxies={'http': cfg.proxy}, headers=headers, data=data_in).content
+		print "C >> S", color('[port %d]' % rport, 4), len(data_out), color(data_repr(data_out), 3, 1), "\n"
+		server_sock.send(data_out)
 
-			console_log = data_in if all(c in string.printable for c in data_in) else repr(data_in)
-			print "S >> C", color('[port %d]' % rport, 4), len(data_in), color(console_log, 3), "\n"
-			client_sock.send(data_in)
+ 	if server_sock in receiving:
+		data_in = server_sock.recv(BUFSIZE)
 
-	#except socket.error as e:
-	#	if "timed out" not in str(e):
-	#		raise e
+		if not len(data_in): # server closed connection
+			print "[+] Server disconnected", server_sock.getpeername()
+			client_sock.close()
+			server_sock.close()
+			break
+
+		# Modify traffic here (see example above)
+		if cfg.proxy:
+			data_in = requests.post('http://%s/SERVER_RESPONSE/from/%s' % (ws, remote), proxies={'http': cfg.proxy}, headers=headers, data=data_in).content
+
+		print "S >> C", color('[port %d]' % rport, 4), len(data_in), color(data_repr(data_in), 3), "\n"
+		client_sock.send(data_in)
 
 def handle_client(clientsock, target, cfg):
 	targetsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

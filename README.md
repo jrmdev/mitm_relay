@@ -3,11 +3,11 @@
 Hackish way to intercept and modify non-HTTP protocols through Burp &amp; others with support for SSL and STARTTLS interception
 
 
-This script is a very simple, quick and easy way to MiTM any arbitrary protocol through existing traffic interception software such as Burp Proxy etc. It can be particularly useful for thick clients security assessments. It saves you from the pain of having to configure specific setup to intercept exotic protocols, or protocols that can't be easily intercepted. At the moment it supports TCP-only protocols.
+This script is a very simple, quick and easy way to MiTM any arbitrary protocol through existing traffic interception software such as Burp Proxy or [Proxenet](https://github.com/hugsy/proxenet). It can be particularly useful for thick clients security assessments. It saves you from the pain of having to configure specific setup to intercept exotic protocols, or protocols that can't be easily intercepted. At the moment it supports TCP-only protocols.
 
 STARTTLS is supported (thanks to https://github.com/ipopov/starttls-mitm), which makes it usable against protocols like XMPP, IMAP, SMTP, IRC, etc.
 
-It's "hackish" in the way that it was specifically designed to use interception and modification capacities or proxy software for any protocol. In order to achieve that, each client request and server response it wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses you will see in your intercepting proxy are meaningless and can be disregarded. Obvisouly, the HTTP headers you will see are useless as well. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
+It's "hackish" in the way that it was specifically designed to use interception and modification capabilities of existing proxies, but for arbitrary protocols. In order to achieve that, each client request and server response it wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses you will see in your intercepting proxy are meaningless and can be disregarded. Obvisouly, the HTTP headers you will see are useless as well. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
 
 - The requests from client to server will appear as a request to a URL containing "CLIENT_REQUEST"
 - The responses from server to client will appear as a request to a URL containing "SERVER_RESPONSE"
@@ -33,7 +33,7 @@ The normal traffic flow during typical usage would be as below:
 usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-p <proxy>]
                      -c <cert> -k <key>
 
-mitm_relay version 0.10
+mitm_relay version 0.20
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -87,10 +87,10 @@ To configure interception for arbitrary protocols, the simplest way is to figure
 
 If however the client uses hard-coded addresses, a solution can be the following. First, run your client in a bridged or host-only VM. Run your client, sniff the network traffic and figure out which IP addresses it is connecting to. Then, a bit of setup is necessary on your host, assuming it is running Linux.
 
-In the examples below, my VM is using IP address 192.168.56.10, my host is 192.168.10.101, and the destination server is running at 1.2.3.4
+In the examples below, my VM is using IP address 192.168.56.10, my host is 192.168.10.101, and the destination server is running at 1.2.3.4:4567
 
 - Create DNAT rules to redirect relevant traffic to the correct relay ports:
-- `iptables -t nat -A PREROUTING -s 192.168.56.10/32 -d 1.2.3.4/32 -j DNAT --to-destination 192.168.10.101`
+- `iptables -t nat -A PREROUTING -s 192.168.56.10/32 -p tcp --dport 4567 -d 1.2.3.4 -j DNAT --to-destination 192.168.10.101`
 - Now just run mitm_relay with listen ports matching the destination ports the client tries to connect to.
 
 You may also want to enable NAT + IP forwarding on your host so that any "non-intercepted" network communications can still reach the destination server (or if you simply need internet access/DNS in your VM):
