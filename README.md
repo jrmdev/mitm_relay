@@ -3,7 +3,7 @@
 Hackish way to intercept and modify non-HTTP protocols through Burp &amp; others with support for SSL and STARTTLS interception
 
 
-This script is a very simple, quick and easy way to MiTM any arbitrary protocol through existing traffic interception software such as Burp Proxy or [Proxenet](https://github.com/hugsy/proxenet). It can be particularly useful for thick clients security assessments. It saves you from the pain of having to configure specific setup to intercept exotic protocols, or protocols that can't be easily intercepted. At the moment it supports TCP-only protocols.
+This script is a very simple, quick and easy way to MiTM any arbitrary protocol through existing traffic interception software such as Burp Proxy or [Proxenet](https://github.com/hugsy/proxenet). It can be particularly useful for thick clients security assessments. It saves you from the pain of having to configure specific setup to intercept exotic protocols, or protocols that can't be easily intercepted. TCP and UDP are supported.
 
 STARTTLS is supported (thanks to https://github.com/ipopov/starttls-mitm), which makes it usable against protocols like XMPP, IMAP, SMTP, IRC, etc.
 
@@ -31,7 +31,7 @@ The normal traffic flow during typical usage would be as below:
 
 ```
 usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-p <proxy>]
-                     -c <cert> -k <key>
+                     [-c <cert>] [-k <key>]
 
 mitm_relay version 0.20
 
@@ -40,9 +40,10 @@ optional arguments:
   -l <listen>, --listen <listen>
                         Address the relays will listen on. Default: 0.0.0.0
   -r <relay> [<relay> ...], --relay <relay> [<relay> ...]
-                        Create new relays. Several relays can be created at
-                        once. Format: -r lport:rhost:rport [lport:rhost:rport
-                        ...]
+                        Create new relays. Several relays can be created by
+                        repeating the paramter. If the protocol is omitted,
+                        TCP will be assumed. Format:
+                        [udp:|tcp:]lport:rhost:rport
   -p <proxy>, --proxy <proxy>
                         Proxy to forward all requests/responses to. If
                         omitted, will run in monitoring only. Format:
@@ -51,6 +52,7 @@ optional arguments:
                         Certificate file to use for SSL/TLS interception
   -k <key>, --key <key>
                         Private key file to use for SSL/TLS interception
+
 ```
 
 # Certificates
@@ -115,6 +117,3 @@ The screenshot below shows the interception of SSL-enabled IRC traffic.
 
 ![IRC Interception](https://github.com/jrmdev/mitm_relay/raw/master/example.png)
 
-# Todo
-
-* UDP Support? Since it works asynchronously, it shoudln't be too hard.
