@@ -11,7 +11,6 @@ import string
 
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
-from optparse import OptionParser
 from select import select
 
 BIND_WEBSERVER = ('127.0.0.1', 49999)
@@ -35,14 +34,19 @@ def main():
 		nargs='+',
 		metavar='<relay>',
 		dest='relays',
-		help='Create new relays. Several relays can be created at once. Format: -r lport:rhost:rport [-r lport:rhost:rport ...]',
+		help='''Create new relays.
+			Several relays can be created by repeating the paramter.
+			If the protocol is omitted, TCP will be assumed.
+			Format: [udp:|tcp:]lport:rhost:rport''',
 		required=True)
 
 	parser.add_argument('-p', '--proxy',
 		action='store',
 		metavar='<proxy>',
 		dest='proxy',
-		help='Proxy to forward all requests/responses to. If omitted, will run in monitoring only. Format: host:port',
+		help='''Proxy to forward all requests/responses to.
+			If omitted, will run in monitoring only.
+			Format: host:port''',
 		default=False)
 
 	parser.add_argument('-c', '--cert',
@@ -51,7 +55,7 @@ def main():
 		dest='cert',
 		type=argparse.FileType('r'),
 		help='Certificate file to use for SSL/TLS interception',
-		default=False, required=True)
+		default=False)
 
 	parser.add_argument('-k', '--key',
 		action='store',
@@ -59,7 +63,7 @@ def main():
 		dest='key',
 		type=argparse.FileType('r'),
 		help='Private key file to use for SSL/TLS interception',
-		default=False, required=True)
+		default=False)
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
@@ -69,10 +73,19 @@ def main():
 	cfg.relays = []
 	for r in relays:
 		r = r.split(':')
+
 		try:
-			cfg.relays.append((int(r[0]), r[1], int(r[2])))
+			if len(r) == 3:
+				cfg.relays.append(('tcp', int(r[0]), r[1], int(r[2])))
+			elif len(r) == 4 and r[0] in ['tcp', 'udp']:
+				cfg.relays.append((r[0], int(r[1]), r[2], int(r[3])))
+			else:
+				raise
 		except:
-			sys.exit('Invalid relay specification, see help.')
+			sys.exit('[!] error: Invalid relay specification, see help.')
+
+	if not (cfg.cert and cfg.key):
+		print color("[!] Server cert/key not provided, SSL/TLS interception will not be available.", 1)
 
 	try:
 		# There is no point starting the local web server
@@ -169,97 +182,152 @@ def data_repr(data):
 		return '\n'.join(res)
 
 	if all(c in string.printable for c in data):
-		return data
+		return '\n'+data
 
 	else:
 		return '\n'+hexdump(data)
 
 # STARTTLS interception code based on:
 # https://github.com/ipopov/starttls-mitm
+def do_relay_tcp(client_sock, server_sock, cfg):
+	server_sock.settimeout(1.0)   
+	client_sock.settimeout(1.0)
 
-def do_relay(client_sock, server_sock, cfg):
-  server_sock.settimeout(1.0)   
-  client_sock.settimeout(1.0)
+	server_peer = server_sock.getpeername()
+	client_peer = client_sock.getpeername()
 
-  ws = '%s:%d' % (BIND_WEBSERVER[0], BIND_WEBSERVER[1])
-  remote = '%s/%d' % server_sock.getpeername()
-  rport = server_sock.getpeername()[1]
-  headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
+	while True:
 
-  while True:
+		# Peek for the beginnings of an ssl handshake
+		try:
+			packet = client_sock.recv(BUFSIZE, socket.MSG_PEEK | socket.MSG_DONTWAIT)
 
-	# Peek for the beginnings of an ssl handshake
-	try:
-		packet = client_sock.recv(BUFSIZE, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+			if packet.startswith('\x16\x03'): # SSL/TLS Handshake.
 
-		if packet.startswith('\x16\x03'): # SSL/TLS Handshake.
+				if not (cfg.cert and cfg.key):
+					print color("[!] SSL/TLS handshake detected, provide a server cert and key to enable interception.", 1)
+				
+				else:
+					print color('------------------ Wrapping sockets ------------------', 2)
+					client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
+					server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
+		except:
+			pass
 
-			print color('------------------ Wrapping sockets ------------------', 2)
-			client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
-			server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
- 
-	except:
-		pass
+		receiving, _, _ = select([client_sock, server_sock], [], [])
 
-	receiving, _, _ = select([client_sock, server_sock], [], [])
+		if client_sock in receiving:
+			data_out = client_sock.recv(BUFSIZE)
 
-	if client_sock in receiving:
-		data_out = client_sock.recv(BUFSIZE)
+			if not len(data_out): # client closed connection
+				print "[+] Client disconnected", client_peer
+				client_sock.close()
+				server_sock.close()
+				break
 
-		if not len(data_out): # client closed connection
-			print "[+] Client disconnected", client_sock.getpeername()
-			client_sock.close()
-			server_sock.close()
-			break
+			data_out = proxify(data_out, cfg, client_peer, server_peer, to_server=True)
+			server_sock.send(data_out)
 
-		# Modify traffic here
-		# Send to your own parser function etc, example:
-		# data_out = data_out.replace('hello world', 'goodbye world')
+	 	if server_sock in receiving:
+			data_in = server_sock.recv(BUFSIZE)
 
-		# or send out to our echo-back webserver through proxy for modification:
+			if not len(data_in): # server closed connection
+				print "[+] Server disconnected", server_peer
+				client_sock.close()
+				server_sock.close()
+				break
+
+			data_in = proxify(data_in, cfg, server_peer, client_peer, to_server=False)
+			client_sock.send(data_in)
+
+def do_relay_udp(relay_sock, server, cfg):
+
+	client = None
+
+	while True:
+
+		receiving, _, _ = select([relay_sock], [], [])
+
+		if relay_sock in receiving:
+
+			data, addr = relay_sock.recvfrom(BUFSIZE)
+
+			if addr == server:
+				data = proxify(data, cfg, client, server, to_server=False)
+				relay_sock.sendto(data, client)
+
+			else:
+				client = addr
+				data = proxify(data, cfg, client, server, to_server=True)
+				relay_sock.sendto(data, server)
+
+def proxify(message, cfg, client_peer, server_peer, to_server=True):
+
+	"""Modify traffic here
+	Send to your own parser function etc, example:
+	message = message.replace('hello world', 'goodbye world')
+
+	or send out to our echo-back webserver through proxy for modification"""
+
+	headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
+	server_str = color('%s:%d' % server_peer, 4, 1)
+	client_str = color('%s:%d' % client_peer, 6, 1)
+	date_str = color(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 5, 1)
+
+	if to_server:
 		if cfg.proxy:
-			data_out = requests.post('http://%s/CLIENT_REQUEST/to/%s' % (ws, remote), proxies={'http': cfg.proxy}, headers=headers, data=data_out).content
+			message = requests.post('http://%s:%d/CLIENT_REQUEST/to/%s/%d' % 
+				(BIND_WEBSERVER[0], BIND_WEBSERVER[1], server_peer[0], server_peer[1]),
+				proxies={'http': cfg.proxy},
+				headers=headers,
+				data=message).content
 
-		print "C >> S", color('[port %d]' % rport, 4), len(data_out), color(data_repr(data_out), 3, 1), "\n"
-		server_sock.send(data_out)
+		msg_str = color(data_repr(message), 3, 1)
+		print "C >> S [ %s >> %s ] [ %s ] [ %d ] %s\n" % (client_str, server_str, date_str, len(message), msg_str)
 
- 	if server_sock in receiving:
-		data_in = server_sock.recv(BUFSIZE)
-
-		if not len(data_in): # server closed connection
-			print "[+] Server disconnected", server_sock.getpeername()
-			client_sock.close()
-			server_sock.close()
-			break
-
-		# Modify traffic here (see example above)
+	else:
 		if cfg.proxy:
-			data_in = requests.post('http://%s/SERVER_RESPONSE/from/%s' % (ws, remote), proxies={'http': cfg.proxy}, headers=headers, data=data_in).content
+			message = requests.post('http://%s:%d/SERVER_RESPONSE/from/%s/%d' % 
+				(BIND_WEBSERVER[0], BIND_WEBSERVER[1], server_peer[0], server_peer[1]),
+				proxies={'http': cfg.proxy},
+				headers=headers,
+				data=message).content
 
-		print "S >> C", color('[port %d]' % rport, 4), len(data_in), color(data_repr(data_in), 3), "\n"
-		client_sock.send(data_in)
+		msg_str = color(data_repr(message), 3, 0)
+		print "S >> C [ %s >> %s ] [ %s ] [ %d ] %s\n" % (server_str, client_str, date_str, len(message), msg_str)
 
-def handle_client(clientsock, target, cfg):
-	targetsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	targetsock.connect(target)
+	return message
 
-	do_relay(clientsock, targetsock, cfg)
+def handle_tcp_client(client_sock, target, cfg):
+	server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	server_sock.connect(target)
+	do_relay_tcp(client_sock, server_sock, cfg)
 
 def create_server(relay, cfg):
+	proto, lport, rhost, rport = relay
 
-	serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	serv.bind((cfg.listen, relay[0]))
-	serv.listen(2)
+	if proto == 'tcp':
+		serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		serv.bind((cfg.listen, lport))
+		serv.listen(2)
 	
-	print '[+] Relay listening on %d -> %s:%d' % relay
-	
-	while True:
-		client, addr = serv.accept()
-		dest_str = '%s:%d' % (relay[1], relay[2])
+		print '[+] Relay listening on %s %d -> %s:%d' % relay
+		
+		while True:
+			if proto == 'tcp':
+				client, addr = serv.accept()
+				dest_str = '%s:%d' % (relay[2], relay[3])
+			
+				print '[+] New client:', addr, "->", color(dest_str, 4)
+				thread = Thread(target=handle_tcp_client, args=(client, (rhost, rport), cfg))
+				thread.start()
+	else:
+		serv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		serv.bind((cfg.listen, lport))
 
-		print '[+] New client:', addr, "->", color(dest_str, 4)
-		thread = Thread(target=handle_client, args=(client, (relay[1], relay[2]), cfg))
+		thread = Thread(target=do_relay_udp, args=(serv, (rhost, rport), cfg))
 		thread.start()
 
 if __name__=='__main__': 
