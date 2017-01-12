@@ -87,26 +87,28 @@ def main():
 	if not (cfg.cert and cfg.key):
 		print color("[!] Server cert/key not provided, SSL/TLS interception will not be available.", 1)
 
-	try:
-		# There is no point starting the local web server
-		# if we are not going to intercept the req/resp (monitor only).
-		if cfg.proxy:
-			start_ws()
+	# There is no point starting the local web server
+	# if we are not going to intercept the req/resp (monitor only).
+	if cfg.proxy:
+		start_ws()
+	else:
+		print color("[!] Interception disabled! %s will run in monitoring mode only." % __prog_name__, 1)
 
-		server_threads = []
-		for relay in cfg.relays:
-			server_threads.append(Thread(target=create_server, args=(relay, cfg)))
+	server_threads = []
+	for relay in cfg.relays:
+		server_threads.append(Thread(target=create_server, args=(relay, cfg)))
 
-		for t in server_threads:
-			t.setDaemon(True)
-			t.start()
-			time.sleep(.2)
+	for t in server_threads:
+		t.setDaemon(True)
+		t.start()
+		time.sleep(.2)
 
-		while True:
-			time.sleep(1)
+	while True:
+		try:
+			time.sleep(100)
 
-	except KeyboardInterrupt:
-		sys.exit("\rExiting...")
+		except KeyboardInterrupt:
+			sys.exit("\rExiting...")
 
 class RequestHandler(BaseHTTPRequestHandler):
 
@@ -237,8 +239,9 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 				server_sock.close()
 				break
 
-			data_in = proxify(data_in, cfg, server_peer, client_peer, to_server=False)
+			data_in = proxify(data_in, cfg, client_peer, server_peer, to_server=False)
 			client_sock.send(data_in)
+
 
 def do_relay_udp(relay_sock, server, cfg):
 
@@ -263,40 +266,51 @@ def do_relay_udp(relay_sock, server, cfg):
 
 def proxify(message, cfg, client_peer, server_peer, to_server=True):
 
-	"""Modify traffic here
+	def get_response():
+		try:
+			return requests.post('http://%s:%d/%s/%s/%d' % 
+				(BIND_WEBSERVER[0], BIND_WEBSERVER[1],
+				('CLIENT_REQUEST/to' if to_server else 'SERVER_RESPONSE/from'),
+				server_peer[0], server_peer[1]),
+				proxies={'http': cfg.proxy},
+				headers=headers,
+				data=message).content
+
+		except requests.exceptions.ProxyError:
+			print color("[!] error: can't connect to proxy!", 1)
+			return message
+	"""
+	Modify traffic here
 	Send to your own parser function etc, example:
 	message = message.replace('hello world', 'goodbye world')
 
-	or send out to our echo-back webserver through proxy for modification"""
+	or send out to our echo-back webserver through proxy for modification
+	"""
 
-	headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
 	server_str = color('%s:%d' % server_peer, 4, 1)
 	client_str = color('%s:%d' % client_peer, 6, 1)
 	date_str = color(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 5, 1)
+	modified = color('(modified!)', 2, 1)
 
-	if to_server:
-		if cfg.proxy:
-			message = requests.post('http://%s:%d/CLIENT_REQUEST/to/%s/%d' % 
-				(BIND_WEBSERVER[0], BIND_WEBSERVER[1], server_peer[0], server_peer[1]),
-				proxies={'http': cfg.proxy},
-				headers=headers,
-				data=message).content
-
-		msg_str = color(data_repr(message), 3, 1)
-		print "C >> S [ %s >> %s ] [ %s ] [ %d ] %s\n" % (client_str, server_str, date_str, len(message), msg_str)
+	if not cfg.proxy:
+		# Bypass interception
+		newmessage = message
 
 	else:
-		if cfg.proxy:
-			message = requests.post('http://%s:%d/SERVER_RESPONSE/from/%s/%d' % 
-				(BIND_WEBSERVER[0], BIND_WEBSERVER[1], server_peer[0], server_peer[1]),
-				proxies={'http': cfg.proxy},
-				headers=headers,
-				data=message).content
+		headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
+		headers['X-Mitm_Relay-To'] = '%s:%d' % (server_peer if to_server else client_peer)
+		headers['X-Mitm_Relay-From'] = '%s:%d' % (client_peer if to_server else server_peer)
+		newmessage = get_response()
 
-		msg_str = color(data_repr(message), 3, 0)
-		print "S >> C [ %s >> %s ] [ %s ] [ %d ] %s\n" % (server_str, client_str, date_str, len(message), msg_str)
+	if to_server:
+		msg_str = color(data_repr(newmessage), 3, 1)
+		print "C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (client_str, server_str, date_str, len(newmessage), modified if newmessage != message else '', msg_str)
 
-	return message
+	else:
+		msg_str = color(data_repr(newmessage), 3, 0)
+		print "S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (server_str, client_str, date_str, len(newmessage), modified if newmessage != message else '', msg_str)
+
+	return newmessage
 
 def handle_tcp_client(client_sock, target, cfg):
 	server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

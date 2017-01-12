@@ -109,11 +109,22 @@ $ iptables -A FORWARD -i $INTERNAL -o $EXTERNAL -j ACCEPT
 
 That should do it.
 
-# Screenshot
+# Screenshots
 
-The screenshot below shows the interception of SSL-enabled IRC traffic.
+Example of DNS interception and modification via Burp interception:
 
-`python mitm_relay.py -l 192.168.10.101 -p 127.0.0.1:8080 -r 6667:chat.freenode.net:6667 -c server.pem -k server.key`
+![DNS Interception](https://i.imgur.com/p4kT8fL.png)
+![DNS Interception](https://i.imgur.com/Fb2Lb6Q.png)
 
-![IRC Interception](https://github.com/jrmdev/mitm_relay/raw/master/example.png)
+Nslookup result:
+
+![Nslookup](https://i.imgur.com/kMuqaL8.png)
+
+Example: SMB/CIFS Traffic interception:
+
+![CIFS](https://i.imgur.com/XHz4Jz0.png)
+
+Example: Disabling compression on a Gmail IMAP session to capture plain text exchanges:
+
+![IMAP](https://i.imgur.com/LuF4GG0.png)
 
