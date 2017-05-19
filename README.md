@@ -7,7 +7,7 @@ This script is a very simple, quick and easy way to MiTM any arbitrary protocol 
 
 STARTTLS is supported (thanks to https://github.com/ipopov/starttls-mitm), which makes it usable against protocols like XMPP, IMAP, SMTP, IRC, etc.
 
-It's "hackish" in the way that it was specifically designed to use interception and modification capabilities of existing proxies, but for arbitrary protocols. In order to achieve that, each client request and server response it wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses you will see in your intercepting proxy are meaningless and can be disregarded. Obvisouly, the HTTP headers you will see are useless as well. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
+It's "hackish" in the way that it was specifically designed to use interception and modification capabilities of existing proxies, but for arbitrary protocols. In order to achieve that, each client request and server response is wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses you will see in your intercepting proxy are meaningless and can be disregarded. Obvisouly, the HTTP headers you will see are useless as well. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
 
 - The requests from client to server will appear as a request to a URL containing "CLIENT_REQUEST"
 - The responses from server to client will appear as a request to a URL containing "SERVER_RESPONSE"
@@ -19,10 +19,13 @@ This way, it is completely asynchronous. Meaning that if the server sends respon
 The normal traffic flow during typical usage would be as below:
 
 ```
-[thick client] ----▶ [relay listener] ----▶ [local proxy] ----▶ [relay listener] ----▶ [destination server]
-                                                |  ▲
-                                                ▼  |
-                                           [dummy webserver]
+[thick client] ----▶ [mitm_relay] ----▶ [destination server]
+                        |  ▲
+                        ▼  |
+                    [local proxy]      < Intercept and
+                        |  ▲             modify traffic here
+                        ▼  |
+                  [dummy webserver]
 ```
 # Usage
 
