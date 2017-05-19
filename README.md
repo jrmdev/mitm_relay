@@ -14,7 +14,7 @@ It's "hackish" in the way that it was specifically designed to use interception 
 
 This way, it is completely asynchronous. Meaning that if the server sends responses in successive packets it won't be a problem.
 
-"Match and Replace" rules can be used as well as Burp Scanner, but make sure to disable insertion points in URL params, headers and cookies (that wouldn't make sense). Only the POST data is what you're after.
+"Match and Replace" rules can be used. However, using other Burp features such as repeater, intruder or scanner is pointless. That would only target the dummy webserver used to echo the data back.
 
 The normal traffic flow during typical usage would be as below:
 
