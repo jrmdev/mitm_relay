@@ -147,41 +147,17 @@ def color(txt, code = 1, modifier = 0):
 
 def data_repr(data):
 
-	def hexdump(src, l=0x10):
-		res = []
-		sep = '.'
-		src = str(src)
+	def hexdump(src, length=0x10):
+		lines = []
+		for c in xrange(0, len(src), length):
 
-		for i in range(0, len(src), l):
-			s = src[i:i+l]
-			hexa = ''
-
-			for h in range(0,len(s)):
-				if h == l/2:
-					hexa += ' '
-				h = s[h]
-				if not isinstance(h, int):
-					h = ord(h)
-				h = hex(h).replace('0x','')
-				if len(h) == 1:
-					h = '0'+h
-				hexa += h + ' '
-
-			hexa = hexa.strip()
-			text = ''
-
-			for c in s:
-				if not isinstance(c, int):
-					c = ord(c)
-
-				if 0x20 <= c < 0x7F:
-					text += chr(c)
-				else:
-					text += sep
-
-			res.append(('%08X:  %-'+str(l*(2+1)+1)+'s  |%s|') % (i, hexa, text))
-
-		return '\n'.join(res)
+			lines.append("%08x:  %-*s  |%s|\n" % 
+				(c, length*3, 
+				' '.join('%02x' % ord(x) for x in src[c:c+length]), 
+				''.join(x if 0x20 < ord(x) < 0x7f else '.' for x in src[c:c+length]))
+			)
+		
+		return ''.join(lines)
 
 	if all(c in string.printable for c in data):
 		return '\n'+data
