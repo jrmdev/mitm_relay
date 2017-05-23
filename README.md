@@ -33,10 +33,10 @@ The normal traffic flow during typical usage would be as below:
 - You can setup multiple relays, using `-r [local port]:[dest_host]:[dest_port]`
 
 ```
-usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-p <proxy>]
-                     [-c <cert>] [-k <key>]
+usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-s <script>]
+                     [-p <proxy>] [-c <cert>] [-k <key>]
 
-mitm_relay version 0.20
+mitm_relay version 0.40
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -47,15 +47,43 @@ optional arguments:
                         repeating the paramter. If the protocol is omitted,
                         TCP will be assumed. Format:
                         [udp:|tcp:]lport:rhost:rport
+  -s <script>, --script <script>
+                        Python script implementing the handle_request() and
+                        handle_response() functions (see example). They will
+                        be called before forwarding traffic to the proxy, if
+                        specified.
   -p <proxy>, --proxy <proxy>
                         Proxy to forward all requests/responses to. If
-                        omitted, will run in monitoring only. Format:
-                        host:port
+                        omitted, traffic will only be printed to the console
+                        (monitoring mode unless a script is specified).
+                        Format: host:port
   -c <cert>, --cert <cert>
                         Certificate file to use for SSL/TLS interception
   -k <key>, --key <key>
                         Private key file to use for SSL/TLS interception
+```
 
+# User scripts
+
+The tool offers the possibility to use custom scripts for traffic analysis and modification. Scripts can be used in replacement or in addition to forwarding the traffic to the proxy. If both a script and a proxy are specified on the command line, the traffic will be sent to the script first and then to the proxy, before being finally forwarded to either to client or the server, depending on where the message came from.
+
+There are several scenarios where you may want to use a script. For example:
+
+  - Update a field of the protocol that specifies the length of a part of the message. If you're modifying data in a protocol that specifies the length of others portions of the message in a specific field, you will want to update that field as well. Of course, some knowledge of the protocol that you're working with is necessary.
+
+  - Fuzz specific parts of a protocol. You could try to change some values arbitrarily in some parts of the messages your thick client is sending.
+
+  - Deserialize objects, do some modifications on them, and re-serialize.
+
+Scripts can implement either of both of the 'handle_request' and 'handle_response' functions (see example script). A script that disables compression on an IMAP session could look like the following:
+
+```
+def handle_request(client_request):
+
+  # Example: remove compression on an IMAP session
+  modified_request = client_request.replace('COMPRESS=DEFLATE', 'COMPRESS=NONE')
+  
+  return modified_request
 ```
 
 # Certificates
@@ -114,15 +142,15 @@ That should do it.
 
 # Demo
 
-The demo below shows how to intercept and nodify DNS lookups using mitm_relay + Burp.
+The demo below shows how to intercept and modify DNS lookups using mitm_relay + Burp.
 
 ![DNS Interception](https://i.imgur.com/0JWYdCP.gif)
 
-This demo shows an SSH session relayed through mitm_relay + Burp. This is pretty useless as it's SSH anyway and can't be altered, but it shows how you can work with binary protocols.
+This demo shows an SSH session relayed through mitm_relay + Burp. This is pretty useless as it's SSH anyway and can't be altered (except maybe the initial handshake and list of ciphers), but it shows how you can work with binary protocols.
 
 ![SSH Interception](http://imgur.com/58TUTkV.gif)
 
-That one shows interception and modification of a MySQL session. Note this is a PoC only as if your modification changes the length of the SQL message, you'll need to update the corresponding fields in the protocol as well, otherwise the session would be corrupted and terminated.
+That one shows interception and modification of a MySQL session. Note this is a PoC only as if your modification changes the length of the SQL message, you'll need to update the corresponding fields in the protocol as well, otherwise the session would be corrupted and terminated. See the 'User scripts' section.
 
 ![SQL Interception](http://imgur.com/xyv1gz7.gif)
 

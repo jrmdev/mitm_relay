@@ -17,7 +17,7 @@ BIND_WEBSERVER = ('127.0.0.1', 49999)
 BUFSIZE = 4096
 
 __prog_name__ = 'mitm_relay'
-__version__ = 0.2
+__version__ = 0.4
 
 def main():
 	parser = argparse.ArgumentParser(description='%s version %.2f' % (__prog_name__, __version__))
@@ -40,12 +40,23 @@ def main():
 			Format: [udp:|tcp:]lport:rhost:rport''',
 		required=True)
 
+	parser.add_argument('-s', '--script',
+		action='store',
+		metavar='<script>',
+		dest='script',
+		type=argparse.FileType('r'),
+		help='''Python script implementing the handle_request() and 
+			handle_response() functions (see example). They will be
+			called before forwarding traffic to the proxy, if specified.''',
+		default=False)
+
 	parser.add_argument('-p', '--proxy',
 		action='store',
 		metavar='<proxy>',
 		dest='proxy',
 		help='''Proxy to forward all requests/responses to.
-			If omitted, will run in monitoring only.
+			If omitted, traffic will only be printed to the console
+			(monitoring mode unless a script is specified).
 			Format: host:port''',
 		default=False)
 
@@ -97,6 +108,15 @@ def main():
 		start_ws()
 	else:
 		print color("[!] Interception disabled! %s will run in monitoring mode only." % __prog_name__, 1)
+
+	# If a script was specified, import it
+	try:
+		from imp import load_source
+		cfg.script_module = load_source(cfg.script.name, cfg.script.name)
+
+	except Exception as e:
+		print color("[!] %s" % str(e))
+		sys.exit()
 
 	server_threads = []
 	for relay in cfg.relays:
@@ -261,36 +281,52 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 			return message
 	"""
 	Modify traffic here
-	Send to your own parser function etc, example:
-	message = message.replace('hello world', 'goodbye world')
-
-	or send out to our echo-back webserver through proxy for modification
+	Send to our own parser functions, to the proxy, or both.
 	"""
 
 	server_str = color('%s:%d' % server_peer, 4, 1)
 	client_str = color('%s:%d' % client_peer, 6, 1)
 	date_str = color(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 5, 1)
-	modified = color('(modified!)', 2, 1)
+	modified_str = color('(modified!)', 2, 1)
+	modified = False
 
-	if not cfg.proxy:
-		# Bypass interception
-		newmessage = message
+	if cfg.script:
+		new_message = message
+		
+		if to_server and hasattr(cfg.script_module, 'handle_request'):
+			new_message = cfg.script_module.handle_request(message)
 
-	else:
+		if not to_server and hasattr(cfg.script_module, 'handle_response'):
+			new_message = cfg.script_module.handle_response(message)
+
+		if new_message == None:
+			print color('[!] Error: make sure handle_request and handle_response both return a message.', 1)
+			new_message = message
+
+		if new_message != message:
+			modified = True
+			message = new_message
+
+	if cfg.proxy:
 		headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
 		headers['X-Mitm_Relay-To'] = '%s:%d' % (server_peer if to_server else client_peer)
 		headers['X-Mitm_Relay-From'] = '%s:%d' % (client_peer if to_server else server_peer)
-		newmessage = get_response()
+
+		new_message = get_response()
+
+		if new_message != message:
+			modified = True
+			message = new_message
 
 	if to_server:
-		msg_str = color(data_repr(newmessage), 3, 1)
-		print "C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (client_str, server_str, date_str, len(newmessage), modified if newmessage != message else '', msg_str)
+		msg_str = color(data_repr(message), 3, 1)
+		print "C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str)
 
 	else:
-		msg_str = color(data_repr(newmessage), 3, 0)
-		print "S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (server_str, client_str, date_str, len(newmessage), modified if newmessage != message else '', msg_str)
+		msg_str = color(data_repr(message), 3, 0)
+		print "S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str)
 
-	return newmessage
+	return message
 
 def handle_tcp_client(client_sock, target, cfg):
 	server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
