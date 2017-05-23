@@ -112,22 +112,25 @@ $ iptables -A FORWARD -i $INTERNAL -o $EXTERNAL -j ACCEPT
 
 That should do it.
 
-# Screenshots
+# Demo
 
-Example of DNS interception and modification via Burp interception:
+The demo below shows how to intercept and nodify DNS lookups using mitm_relay + Burp.
 
-![DNS Interception](https://i.imgur.com/p4kT8fL.png)
-![DNS Interception](https://i.imgur.com/Fb2Lb6Q.png)
+![DNS Interception](https://i.imgur.com/0JWYdCP.gif)
 
-Nslookup result:
+This demo shows an SSH session relayed through mitm_relay + Burp. This is pretty useless as it's SSH anyway and can't be altered, but it shows how you can work with binary protocols.
 
-![Nslookup](https://i.imgur.com/kMuqaL8.png)
+![SSH Interception](http://imgur.com/58TUTkV.gif)
 
-Example: SMB/CIFS Traffic interception:
+That one shows interception and modification of a MySQL session. Note this is a PoC only as if your modification changes the length of the SQL message, you'll need to update the corresponding fields in the protocol as well, otherwise the session would be corrupted and terminated.
+
+![SQL Interception](http://imgur.com/xyv1gz7.gif)
+
+Screenshot: SMB/CIFS Traffic interception:
 
 ![CIFS](https://i.imgur.com/XHz4Jz0.png)
 
-Example: Disabling compression on a Gmail IMAP session to capture plain text exchanges:
+Screenshot: Disabling compression on a Gmail IMAP session to capture plain text exchanges:
 
 ![IMAP](https://i.imgur.com/LuF4GG0.png)
 

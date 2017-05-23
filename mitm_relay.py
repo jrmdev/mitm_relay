@@ -81,6 +81,10 @@ def main():
 				cfg.relays.append((r[0], int(r[1]), r[2], int(r[3])))
 			else:
 				raise
+
+			if r[0] == 'udp' and cfg.listen.startswith('127.0.0'):
+				print color("[!] In UDP, it's not recommended to bind to 127.0.0.1. If you see errors, try to bind to your LAN IP address instead.", 1)
+
 		except:
 			sys.exit('[!] error: Invalid relay specification, see help.')
 
