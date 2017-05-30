@@ -75,6 +75,8 @@ There are several scenarios where you may want to use a script. For example:
 
   - Deserialize objects, do some modifications on them, and re-serialize.
 
+  - Monitor traffic flow or log data to a file (example: extract usernames and passwords)
+
 Scripts can implement either of both of the 'handle_request' and 'handle_response' functions (see example script). A script that disables compression on an IMAP session could look like the following:
 
 ```

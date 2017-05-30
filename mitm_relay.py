@@ -110,13 +110,14 @@ def main():
 		print color("[!] Interception disabled! %s will run in monitoring mode only." % __prog_name__, 1)
 
 	# If a script was specified, import it
-	try:
-		from imp import load_source
-		cfg.script_module = load_source(cfg.script.name, cfg.script.name)
+	if cfg.script:
+		try:
+			from imp import load_source
+			cfg.script_module = load_source(cfg.script.name, cfg.script.name)
 
-	except Exception as e:
-		print color("[!] %s" % str(e))
-		sys.exit()
+		except Exception as e:
+			print color("[!] %s" % str(e))
+			sys.exit()
 
 	server_threads = []
 	for relay in cfg.relays:
@@ -218,30 +219,34 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 
 		receiving, _, _ = select([client_sock, server_sock], [], [])
 
-		if client_sock in receiving:
-			data_out = client_sock.recv(BUFSIZE)
 
-			if not len(data_out): # client closed connection
-				print "[+] Client disconnected", client_peer
-				client_sock.close()
-				server_sock.close()
-				break
+		try:
+			if client_sock in receiving:
+				data_out = client_sock.recv(BUFSIZE)
 
-			data_out = proxify(data_out, cfg, client_peer, server_peer, to_server=True)
-			server_sock.send(data_out)
+				if not len(data_out): # client closed connection
+					print "[+] Client disconnected", client_peer
+					client_sock.close()
+					server_sock.close()
+					break
 
-	 	if server_sock in receiving:
-			data_in = server_sock.recv(BUFSIZE)
+				data_out = proxify(data_out, cfg, client_peer, server_peer, to_server=True)
+				server_sock.send(data_out)
 
-			if not len(data_in): # server closed connection
-				print "[+] Server disconnected", server_peer
-				client_sock.close()
-				server_sock.close()
-				break
+		 	if server_sock in receiving:
+				data_in = server_sock.recv(BUFSIZE)
 
-			data_in = proxify(data_in, cfg, client_peer, server_peer, to_server=False)
-			client_sock.send(data_in)
+				if not len(data_in): # server closed connection
+					print "[+] Server disconnected", server_peer
+					client_sock.close()
+					server_sock.close()
+					break
 
+				data_in = proxify(data_in, cfg, client_peer, server_peer, to_server=False)
+				client_sock.send(data_in)
+
+		except socket.error as e:
+			print color("[!] %s" % str(e))
 
 def do_relay_udp(relay_sock, server, cfg):
 
