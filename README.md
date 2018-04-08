@@ -61,6 +61,10 @@ optional arguments:
                         Certificate file to use for SSL/TLS interception
   -k <key>, --key <key>
                         Private key file to use for SSL/TLS interception
+  -cc <cert>, --clientcert <cert>
+                        Client certificate file to use for connecting to server
+  -ck <key>, --clientkey <key>
+                        Client private key file to use for connecting to server
 ```
 
 # User scripts
