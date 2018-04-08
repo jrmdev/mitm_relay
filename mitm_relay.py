@@ -75,6 +75,22 @@ def main():
 		type=argparse.FileType('r'),
 		help='Private key file to use for SSL/TLS interception',
 		default=False)
+	
+	parser.add_argument('-cc', '--clientcert',
+		action='store',
+		metavar='<clientcert>',
+		dest='clientcert',
+		type=argparse.FileType('r'),
+		help='Client certificate file to use for connecting to server',
+		default=False)
+
+	parser.add_argument('-ck', '--clientkey',
+		action='store',
+		metavar='<clientkey>',
+		dest='clientkey',
+		type=argparse.FileType('r'),
+		help='Client private key file to use for connecting to server',
+		default=False)
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
@@ -101,6 +117,9 @@ def main():
 
 	if not (cfg.cert and cfg.key):
 		print color("[!] Server cert/key not provided, SSL/TLS interception will not be available.", 1)
+	
+	if not (cfg.clientcert and cfg.clientkey):
+		print color("[!] Client cert/key not provided.", 1)
 
 	# There is no point starting the local web server
 	# if we are not going to intercept the req/resp (monitor only).
@@ -213,7 +232,12 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 				else:
 					print color('------------------ Wrapping sockets ------------------', 2)
 					client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
-					server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
+					
+					# Use client-side cert/key if provided.
+					if (cfg.clientcert and cfg.clientkey):
+						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True, certfile=cfg.clientcert.name, keyfile=cfg.clientkey.name)
+					else:
+						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
 		except:
 			pass
 
