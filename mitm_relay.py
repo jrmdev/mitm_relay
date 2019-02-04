@@ -21,7 +21,7 @@ __version__ = 0.4
 
 def main():
 	parser = argparse.ArgumentParser(description='%s version %.2f' % (__prog_name__, __version__))
-	
+
 	parser.add_argument('-l', '--listen',
 		action='store',
 		metavar='<listen>',
@@ -45,7 +45,7 @@ def main():
 		metavar='<script>',
 		dest='script',
 		type=argparse.FileType('r'),
-		help='''Python script implementing the handle_request() and 
+		help='''Python script implementing the handle_request() and
 			handle_response() functions (see example). They will be
 			called before forwarding traffic to the proxy, if specified.''',
 		default=False)
@@ -75,7 +75,7 @@ def main():
 		type=argparse.FileType('r'),
 		help='Private key file to use for SSL/TLS interception',
 		default=False)
-	
+
 	parser.add_argument('-cc', '--clientcert',
 		action='store',
 		metavar='<clientcert>',
@@ -117,7 +117,7 @@ def main():
 
 	if not (cfg.cert and cfg.key):
 		print color("[!] Server cert/key not provided, SSL/TLS interception will not be available.", 1)
-	
+
 	if not (cfg.clientcert and cfg.clientkey):
 		print color("[!] Client cert/key not provided.", 1)
 
@@ -157,7 +157,6 @@ def main():
 class RequestHandler(BaseHTTPRequestHandler):
 
 	def do_GET(self):
-		
 		content_length = self.headers.getheaders('content-length')
 		length = int(content_length[0]) if content_length else 0
 		body = self.rfile.read(length)
@@ -195,12 +194,12 @@ def data_repr(data):
 		lines = []
 		for c in xrange(0, len(src), length):
 
-			lines.append("%08x:  %-*s  |%s|\n" % 
-				(c, length*3, 
-				' '.join('%02x' % ord(x) for x in src[c:c+length]), 
+			lines.append("%08x:  %-*s  |%s|\n" %
+				(c, length*3,
+				' '.join('%02x' % ord(x) for x in src[c:c+length]),
 				''.join(x if 0x20 < ord(x) < 0x7f else '.' for x in src[c:c+length]))
 			)
-		
+
 		return ''.join(lines)
 
 	if all(c in string.printable for c in data):
@@ -212,7 +211,7 @@ def data_repr(data):
 # STARTTLS interception code based on:
 # https://github.com/ipopov/starttls-mitm
 def do_relay_tcp(client_sock, server_sock, cfg):
-	server_sock.settimeout(1.0)   
+	server_sock.settimeout(1.0)
 	client_sock.settimeout(1.0)
 
 	server_peer = server_sock.getpeername()
@@ -228,11 +227,11 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 
 				if not (cfg.cert and cfg.key):
 					print color("[!] SSL/TLS handshake detected, provide a server cert and key to enable interception.", 1)
-				
+
 				else:
 					print color('------------------ Wrapping sockets ------------------', 2)
 					client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
-					
+
 					# Use client-side cert/key if provided.
 					if (cfg.clientcert and cfg.clientkey):
 						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True, certfile=cfg.clientcert.name, keyfile=cfg.clientkey.name)
@@ -257,7 +256,7 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 				data_out = proxify(data_out, cfg, client_peer, server_peer, to_server=True)
 				server_sock.send(data_out)
 
-		 	if server_sock in receiving:
+                        if server_sock in receiving:
 				data_in = server_sock.recv(BUFSIZE)
 
 				if not len(data_in): # server closed connection
@@ -297,7 +296,7 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 
 	def get_response():
 		try:
-			return requests.post('http://%s:%d/%s/%s/%d' % 
+			return requests.post('http://%s:%d/%s/%s/%d' %
 				(BIND_WEBSERVER[0], BIND_WEBSERVER[1],
 				('CLIENT_REQUEST/to' if to_server else 'SERVER_RESPONSE/from'),
 				server_peer[0], server_peer[1]),
@@ -321,7 +320,7 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 
 	if cfg.script:
 		new_message = message
-		
+
 		if to_server and hasattr(cfg.script_module, 'handle_request'):
 			new_message = cfg.script_module.handle_request(message)
 
@@ -370,14 +369,14 @@ def create_server(relay, cfg):
 		serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		serv.bind((cfg.listen, lport))
 		serv.listen(2)
-	
+
 		print '[+] Relay listening on %s %d -> %s:%d' % relay
-		
+
 		while True:
 			if proto == 'tcp':
 				client, addr = serv.accept()
 				dest_str = '%s:%d' % (relay[2], relay[3])
-			
+
 				print '[+] New client:', addr, "->", color(dest_str, 4)
 				thread = Thread(target=handle_tcp_client, args=(client, (rhost, rport), cfg))
 				thread.start()
@@ -389,5 +388,5 @@ def create_server(relay, cfg):
 		thread = Thread(target=do_relay_udp, args=(serv, (rhost, rport), cfg))
 		thread.start()
 
-if __name__=='__main__': 
+if __name__=='__main__':
 	main()
