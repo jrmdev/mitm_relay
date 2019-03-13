@@ -92,6 +92,13 @@ def main():
 		help='Client private key file to use for connecting to server',
 		default=False)
 
+	parser.add_argument('-t', '--tlsver',
+		action='store',
+		metavar='<tls1|tls11|tls12|ssl2|ssl3>',
+		dest='tlsver',
+		help='Force SSL/TLS version',
+		default=False)
+
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
 
@@ -217,6 +224,20 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 	server_peer = server_sock.getpeername()
 	client_peer = client_sock.getpeername()
 
+	cfg_ssl_version = ssl.PROTOCOL_TLS
+	if cfg.tlsver:
+		if cfg.tlsver == "tls1":
+			cfg_ssl_version = ssl.PROTOCOL_TLSv1
+		elif cfg.tlsver == "tls11":
+			cfg_ssl_version = ssl.PROTOCOL_TLSv1_1
+		elif cfg.tlsver == "tls12":
+			cfg_ssl_version = ssl.PROTOCOL_TLSv1_2
+		elif cfg.tlsver == "ssl2":
+			cfg_ssl_version = ssl.PROTOCOL_SSLv2
+		elif cfg.tlsver == "ssl3":
+			cfg_ssl_version = ssl.PROTOCOL_SSLv3
+
+
 	while True:
 
 		# Peek for the beginnings of an ssl handshake
@@ -230,13 +251,13 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 
 				else:
 					print color('------------------ Wrapping sockets ------------------', 2)
-					client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name)
+					client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name, ssl_version=cfg_ssl_version)
 
 					# Use client-side cert/key if provided.
 					if (cfg.clientcert and cfg.clientkey):
-						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True, certfile=cfg.clientcert.name, keyfile=cfg.clientkey.name)
+						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True, certfile=cfg.clientcert.name, keyfile=cfg.clientkey.name, ssl_version=cfg_ssl_version)
 					else:
-						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True)
+						server_sock = ssl.wrap_socket(server_sock, suppress_ragged_eofs=True, ssl_version=cfg_ssl_version)
 		except:
 			pass
 
