@@ -224,7 +224,10 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 	server_peer = server_sock.getpeername()
 	client_peer = client_sock.getpeername()
 
-	cfg_ssl_version = ssl.PROTOCOL_TLS
+	# ssl.PROTOCOL_TLS is available only since 2.7.13
+	# in order to support older versions let's fall back to what is default
+	cfg_ssl_version = ssl.PROTOCOL_SSLv23
+
 	if cfg.tlsver:
 		if cfg.tlsver == "tls1":
 			cfg_ssl_version = ssl.PROTOCOL_TLSv1
