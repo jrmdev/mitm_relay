@@ -7,7 +7,7 @@ This script is a very simple, quick and easy way to MiTM any arbitrary protocol 
 
 STARTTLS is supported (thanks to https://github.com/ipopov/starttls-mitm), which makes it usable against protocols like XMPP, IMAP, SMTP, IRC, etc.
 
-It's "hackish" in the way that it was specifically designed to use interception and modification capabilities of existing proxies, but for arbitrary protocols. In order to achieve that, each client request and server response is wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses you will see in your intercepting proxy are meaningless and can be disregarded. Obvisouly, the HTTP headers you will see are useless as well. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
+It's "hackish" in the way that it was specifically designed to use interception and modification capabilities of existing proxies, but for arbitrary protocols. In order to achieve that, each client request and server response is wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses or headers that you will see in your intercepting proxy are meaningless and can be disregarded. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
 
 - The requests from client to server will appear as a request to a URL containing "CLIENT_REQUEST"
 - The responses from server to client will appear as a request to a URL containing "SERVER_RESPONSE"
@@ -16,17 +16,11 @@ This way, it is completely asynchronous. Meaning that if the server sends respon
 
 "Match and Replace" rules can be used. However, using other Burp features such as repeater, intruder or scanner is pointless. That would only target the dummy webserver used to echo the data back.
 
-The normal traffic flow during typical usage would be as below:
+The normal request traffic flow during typical usage would be as below:
 
-```
-[thick client] ----▶ [mitm_relay] ----▶ [destination server]
-                        |  ▲
-                        ▼  |
-                    [local proxy]      < Intercept and
-                        |  ▲             modify traffic here
-                        ▼  |
-                  [dummy webserver]
-```
+![Traffic flow](https://i.imgur.com/FmOlTQk.png)
+
+
 # Usage
 
 - If you don't specify a proxy, the traffic will simply be dumped to stdout.
@@ -156,7 +150,7 @@ This demo shows an SSH session relayed through mitm_relay + Burp. This is pretty
 
 ![SSH Interception](http://imgur.com/58TUTkV.gif)
 
-That one shows interception and modification of a MySQL session. Note this is a PoC only as if your modification changes the length of the SQL message, you'll need to update the corresponding fields in the protocol as well, otherwise the session would be corrupted and terminated. See the 'User scripts' section.
+That one shows interception and modification of a MySQL session. Note this is a PoC only as if your modification changes the length of the SQL message, you'll need to update the corresponding fields in the protocol as well, otherwise the session would be corrupted and terminated. See the 'User scripts' section and see [this](https://github.com/jrmdev/mitm_relay/issues/6) for an example of how to do it.
 
 ![SQL Interception](http://imgur.com/xyv1gz7.gif)
 
