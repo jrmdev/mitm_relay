@@ -18,7 +18,7 @@ This way, it is completely asynchronous. Meaning that if the server sends respon
 
 The normal request traffic flow during typical usage would be as below:
 
-![Traffic flow](https://i.imgur.com/FmOlTQk.png)
+![Traffic flow](https://i.imgur.com/mnvvSk4.png)
 
 
 # Usage
