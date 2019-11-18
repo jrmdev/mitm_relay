@@ -98,6 +98,14 @@ def main():
 		dest='tlsver',
 		help='Force SSL/TLS version',
 		default=False)
+	parser.add_argument('-sk', '--sslkeylog',
+		action='store',
+		metavar='<ssl keylog file>',
+		dest='sslkeylog',
+		type=argparse.FileType('a'),
+		help='Dump SSL (pre-)master secrets to <ssl keylog file>',
+		default=False)
+
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
@@ -144,6 +152,16 @@ def main():
 		except Exception as e:
 			print color("[!] %s" % str(e))
 			sys.exit()
+	# If a ssl keylog file was specified, dump (pre-)master secrets
+	if cfg.sslkeylog:
+		try:
+			import sslkeylog
+			sslkeylog.set_keylog(cfg.sslkeylog)
+
+		except Exception as e:
+			print color("[!] %s" % str(e))
+			sys.exit()
+
 
 	server_threads = []
 	for relay in cfg.relays:
