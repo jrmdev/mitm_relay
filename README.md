@@ -28,7 +28,9 @@ The normal request traffic flow during typical usage would be as below:
 
 ```
 usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-s <script>]
-                     [-p <proxy>] [-c <cert>] [-k <key>]
+                     [-p <proxy>] [-c <cert>] [-k <key>] [-cc <clientcert>]
+                     [-ck <clientkey>] [-t <tls1|tls11|tls12|ssl2|ssl3>]
+                     [-sk <ssl keylog file>]
 
 mitm_relay version 0.40
 
@@ -55,10 +57,16 @@ optional arguments:
                         Certificate file to use for SSL/TLS interception
   -k <key>, --key <key>
                         Private key file to use for SSL/TLS interception
-  -cc <cert>, --clientcert <cert>
-                        Client certificate file to use for connecting to server
-  -ck <key>, --clientkey <key>
-                        Client private key file to use for connecting to server
+  -cc <clientcert>, --clientcert <clientcert>
+                        Client certificate file to use for connecting to
+                        server
+  -ck <clientkey>, --clientkey <clientkey>
+                        Client private key file to use for connecting to
+                        server
+  -t <tls1|tls11|tls12|ssl2|ssl3>, --tlsver <tls1|tls11|tls12|ssl2|ssl3>
+                        Force SSL/TLS version
+  -sk <ssl keylog file>, --sslkeylog <ssl keylog file>
+                        Dump SSL (pre-)master secrets to <ssl keylog file>
 ```
 
 # User scripts
@@ -82,7 +90,7 @@ def handle_request(client_request):
 
   # Example: remove compression on an IMAP session
   modified_request = client_request.replace('COMPRESS=DEFLATE', 'COMPRESS=NONE')
-  
+
   return modified_request
 ```
 
@@ -161,4 +169,3 @@ Screenshot: SMB/CIFS Traffic interception:
 Screenshot: Disabling compression on a Gmail IMAP session to capture plain text exchanges:
 
 ![IMAP](https://i.imgur.com/LuF4GG0.png)
-
