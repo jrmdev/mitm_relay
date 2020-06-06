@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys
 import socket
@@ -9,7 +9,7 @@ import argparse
 import time
 import string
 
-from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 from select import select
 
@@ -17,7 +17,7 @@ BIND_WEBSERVER = ('127.0.0.1', 49999)
 BUFSIZE = 4096
 
 __prog_name__ = 'mitm_relay'
-__version__ = 0.4
+__version__ = 1.0
 
 def main():
 	parser = argparse.ArgumentParser(description='%s version %.2f' % (__prog_name__, __version__))
@@ -125,23 +125,23 @@ def main():
 				raise
 
 			if r[0] == 'udp' and cfg.listen.startswith('127.0.0'):
-				print color("[!] In UDP, it's not recommended to bind to 127.0.0.1. If you see errors, try to bind to your LAN IP address instead.", 1)
+				print(color("[!] In UDP, it's not recommended to bind to 127.0.0.1. If you see errors, try to bind to your LAN IP address instead.", 1, 31))
 
 		except:
 			sys.exit('[!] error: Invalid relay specification, see help.')
 
 	if not (cfg.cert and cfg.key):
-		print color("[!] Server cert/key not provided, SSL/TLS interception will not be available.", 1)
+		print(color("[!] Server cert/key not provided, SSL/TLS interception will not be available. To generate certs, see provided script 'gen_certs.sh'.", 1, 31))
 
 	if not (cfg.clientcert and cfg.clientkey):
-		print color("[!] Client cert/key not provided.", 1)
+		print("[i] Client cert/key not provided.")
 
 	# There is no point starting the local web server
 	# if we are not going to intercept the req/resp (monitor only).
 	if cfg.proxy:
 		start_ws()
 	else:
-		print color("[!] Interception disabled! %s will run in monitoring mode only." % __prog_name__, 1)
+		print(color("[!] Interception disabled! %s will run in monitoring mode only." % __prog_name__, 0, 31))
 
 	# If a script was specified, import it
 	if cfg.script:
@@ -150,8 +150,9 @@ def main():
 			cfg.script_module = load_source(cfg.script.name, cfg.script.name)
 
 		except Exception as e:
-			print color("[!] %s" % str(e))
+			print(color("[!] %s" % str(e), 1, 31))
 			sys.exit()
+
 	# If a ssl keylog file was specified, dump (pre-)master secrets
 	if cfg.sslkeylog:
 		try:
@@ -159,7 +160,7 @@ def main():
 			sslkeylog.set_keylog(cfg.sslkeylog)
 
 		except Exception as e:
-			print color("[!] %s" % str(e))
+			print(color("[!] %s" % str(e), 1, 31))
 			sys.exit()
 
 
@@ -182,9 +183,8 @@ def main():
 class RequestHandler(BaseHTTPRequestHandler):
 
 	def do_GET(self):
-		content_length = self.headers.getheaders('content-length')
-		length = int(content_length[0]) if content_length else 0
-		body = self.rfile.read(length)
+		content_length = int(self.headers.get('content-length'))
+		body = self.rfile.read(content_length)
 
 		self.send_response(200)
 		self.end_headers()
@@ -199,7 +199,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 	do_DELETE = do_GET
 
 def start_ws():
-	print '[+] Webserver listening on', BIND_WEBSERVER
+	print('[+] Webserver listening on', BIND_WEBSERVER)
 	server = HTTPServer(BIND_WEBSERVER, RequestHandler)
 
 	try:
@@ -210,27 +210,28 @@ def start_ws():
 	except KeyboardInterrupt:
 		server.shutdown()
 
-def color(txt, code = 1, modifier = 0):
-  return "\033[%d;3%dm%s\033[0m" % (modifier, code, txt)
+def color(txt, mod=1, fg=32, bg=49):
+	return "\033[%s;%d;%dm%s\033[0m" % (mod, fg, bg, txt) if 'win' not in sys.platform else txt
 
 def data_repr(data):
 
-	def hexdump(src, length=0x10):
-		lines = []
-		for c in xrange(0, len(src), length):
+	def hexdump(src, length=16):
+		result = []
+		digits = 2
 
-			lines.append("%08x:  %-*s  |%s|\n" %
-				(c, length*3,
-				' '.join('%02x' % ord(x) for x in src[c:c+length]),
-				''.join(x if 0x20 < ord(x) < 0x7f else '.' for x in src[c:c+length]))
-			)
+		s = src[:]
+		for i in range(0, len(s), length):
+			hexa = " ".join(["%0*X" % (digits, x) for x in src[i:i+length]])
+			text = "".join([chr(x) if 0x20 <= x < 0x7F else "." for x in s[i:i+length]])
+			result.append("%08x:  %-*s  |%s|\n" % (1, length * (digits + 1), hexa, text))
 
-		return ''.join(lines)
+		return "".join(result)
 
-	if all(c in string.printable for c in data):
+	try:
+		data = data.decode("ascii")
 		return '\n'+data
 
-	else:
+	except:
 		return '\n'+hexdump(data)
 
 # STARTTLS interception code based on:
@@ -243,8 +244,10 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 	client_peer = client_sock.getpeername()
 
 	# ssl.PROTOCOL_TLS is available only since 2.7.13
-	# in order to support older versions let's fall back to what is default
-	cfg_ssl_version = ssl.PROTOCOL_SSLv23
+	try:
+		cfg_ssl_version = ssl.PROTOCOL_TLS
+	except:
+		cfg_ssl_version = ssl.PROTOCOL_SSLv23
 
 	if cfg.tlsver:
 		if cfg.tlsver == "tls1":
@@ -253,11 +256,8 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 			cfg_ssl_version = ssl.PROTOCOL_TLSv1_1
 		elif cfg.tlsver == "tls12":
 			cfg_ssl_version = ssl.PROTOCOL_TLSv1_2
-		elif cfg.tlsver == "ssl2":
-			cfg_ssl_version = ssl.PROTOCOL_SSLv2
-		elif cfg.tlsver == "ssl3":
-			cfg_ssl_version = ssl.PROTOCOL_SSLv3
-
+		elif cfg.tlsver in ["ssl2", "ssl3"]:
+			cfg_ssl_version = ssl.PROTOCOL_SSLv23
 
 	while True:
 
@@ -265,13 +265,13 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 		try:
 			packet = client_sock.recv(BUFSIZE, socket.MSG_PEEK | socket.MSG_DONTWAIT)
 
-			if packet.startswith('\x16\x03'): # SSL/TLS Handshake.
+			if packet.startswith(b'\x16\x03'): # SSL/TLS Handshake.
 
 				if not (cfg.cert and cfg.key):
-					print color("[!] SSL/TLS handshake detected, provide a server cert and key to enable interception.", 1)
+					print(color("[!] SSL/TLS handshake detected, provide a server cert and key to enable interception.", 1, 31))
 
 				else:
-					print color('------------------ Wrapping sockets ------------------', 2)
+					print(color('---------------------- Wrapping sockets ----------------------', 1, 32))
 					client_sock = ssl.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, certfile=cfg.cert.name, keyfile=cfg.key.name, ssl_version=cfg_ssl_version)
 
 					# Use client-side cert/key if provided.
@@ -284,13 +284,12 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 
 		receiving, _, _ = select([client_sock, server_sock], [], [])
 
-
 		try:
 			if client_sock in receiving:
 				data_out = client_sock.recv(BUFSIZE)
 
 				if not len(data_out): # client closed connection
-					print "[+] Client disconnected", client_peer
+					print("[+] Client disconnected", client_peer)
 					client_sock.close()
 					server_sock.close()
 					break
@@ -298,11 +297,11 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 				data_out = proxify(data_out, cfg, client_peer, server_peer, to_server=True)
 				server_sock.send(data_out)
 
-                        if server_sock in receiving:
+			if server_sock in receiving:
 				data_in = server_sock.recv(BUFSIZE)
 
 				if not len(data_in): # server closed connection
-					print "[+] Server disconnected", server_peer
+					print("[+] Server disconnected", server_peer)
 					client_sock.close()
 					server_sock.close()
 					break
@@ -311,7 +310,7 @@ def do_relay_tcp(client_sock, server_sock, cfg):
 				client_sock.send(data_in)
 
 		except socket.error as e:
-			print color("[!] %s" % str(e))
+			print(color("[!] %s" % str(e), 1, 31))
 
 def do_relay_udp(relay_sock, server, cfg):
 
@@ -347,17 +346,17 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 				data=message).content
 
 		except requests.exceptions.ProxyError:
-			print color("[!] error: can't connect to proxy!", 1)
+			print(color("[!] error: can't connect to proxy!", 1, 31))
 			return message
 	"""
 	Modify traffic here
 	Send to our own parser functions, to the proxy, or both.
 	"""
 
-	server_str = color('%s:%d' % server_peer, 4, 1)
-	client_str = color('%s:%d' % client_peer, 6, 1)
-	date_str = color(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 5, 1)
-	modified_str = color('(modified!)', 2, 1)
+	server_str = color('%s:%d' % server_peer, 1, 34)
+	client_str = color('%s:%d' % client_peer, 1, 36)
+	date_str = color(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 1, 35)
+	modified_str = color('(modified!)', 1, 32)
 	modified = False
 
 	if cfg.script:
@@ -370,7 +369,7 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 			new_message = cfg.script_module.handle_response(message)
 
 		if new_message == None:
-			print color('[!] Error: make sure handle_request and handle_response both return a message.', 1)
+			print(color("[!] Error: make sure handle_request and handle_response both return a message.", 1, 31))
 			new_message = message
 
 		if new_message != message:
@@ -389,12 +388,12 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 			message = new_message
 
 	if to_server:
-		msg_str = color(data_repr(message), 3, 1)
-		print "C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str)
+		msg_str = color(data_repr(message), 0, 93)
+		print("C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str))
 
 	else:
-		msg_str = color(data_repr(message), 3, 0)
-		print "S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str)
+		msg_str = color(data_repr(message), 0, 33)
+		print("S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str))
 
 	return message
 
@@ -412,14 +411,14 @@ def create_server(relay, cfg):
 		serv.bind((cfg.listen, lport))
 		serv.listen(2)
 
-		print '[+] Relay listening on %s %d -> %s:%d' % relay
+		print('[+] Relay listening on %s %d -> %s:%d' % relay)
 
 		while True:
 			if proto == 'tcp':
 				client, addr = serv.accept()
 				dest_str = '%s:%d' % (relay[2], relay[3])
 
-				print '[+] New client:', addr, "->", color(dest_str, 4)
+				print(color('[+] New client %s:%d will be relayed to %s' % (addr[0], addr[1], dest_str), 1, 39))
 				thread = Thread(target=handle_tcp_client, args=(client, (rhost, rport), cfg))
 				thread.start()
 	else:

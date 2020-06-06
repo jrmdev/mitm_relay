@@ -5,7 +5,7 @@ def handle_request(client_request):
 	"""
 
 	modified_request = client_request.replace('original', 'modified')
-	
+
 	return modified_request
 
 def handle_response(server_response):
