@@ -52,7 +52,12 @@ optional arguments:
                         Proxy to forward all requests/responses to. If
                         omitted, traffic will only be printed to the console
                         (monitoring mode unless a script is specified).
-                        Format: host:port
+                        Format: [scheme://]host:port
+                        in case the error :
+                        "[!] Not supported proxy scheme None"
+                        try scheme://host:port instead
+
+
   -c <cert>, --cert <cert>
                         Certificate file to use for SSL/TLS interception
   -k <key>, --key <key>
