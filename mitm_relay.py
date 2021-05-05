@@ -98,6 +98,7 @@ def main():
 		dest='tlsver',
 		help='Force SSL/TLS version',
 		default=False)
+
 	parser.add_argument('-sk', '--sslkeylog',
 		action='store',
 		metavar='<ssl keylog file>',
@@ -106,6 +107,21 @@ def main():
 		help='Dump SSL (pre-)master secrets to <ssl keylog file>',
 		default=False)
 
+	parser.add_argument('-ct', '--client-timeout',
+		action='store',
+		metavar=1.0,
+		dest='client_timeout',
+		type=int,
+		help='Client socket connection timeout',
+		default=False)
+
+	parser.add_argument('-st', '--server-timeout',
+		action='store',
+		metavar=1.0,
+		dest='server_timeout',
+		type=int,
+		help='Server socket connection timeout',
+		default=False)
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
@@ -237,8 +253,8 @@ def data_repr(data):
 # STARTTLS interception code based on:
 # https://github.com/ipopov/starttls-mitm
 def do_relay_tcp(client_sock, server_sock, cfg):
-	server_sock.settimeout(1.0)
-	client_sock.settimeout(1.0)
+	server_sock.settimeout(cfg.server_timeout)
+	client_sock.settimeout(cfg.client_timeout)
 
 	server_peer = server_sock.getpeername()
 	client_peer = client_sock.getpeername()
