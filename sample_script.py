@@ -4,7 +4,7 @@ def handle_request(client_request):
 	It must return the request to be forwarded to the server (or proxy if specified).
 	"""
 
-	modified_request = client_request.replace('original', 'modified')
+	modified_request = client_request.replace(b'original', b'modified')
 
 	return modified_request
 
@@ -14,6 +14,6 @@ def handle_response(server_response):
 	It must return the response to be fowarded to the client (or proxy if specified).
 	"""
 
-	modified_response = server_response.replace('example', 'testing')
+	modified_response = server_response.replace(b'example', b'testing')
 
 	return modified_response
