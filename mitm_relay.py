@@ -239,7 +239,7 @@ def data_repr(data):
 		for i in range(0, len(s), length):
 			hexa = " ".join(["%0*X" % (digits, x) for x in src[i:i+length]])
 			text = "".join([chr(x) if 0x20 <= x < 0x7F else "." for x in s[i:i+length]])
-			result.append("%08x:  %-*s  |%s|\n" % (1, length * (digits + 1), hexa, text))
+			result.append("%08x:  %-*s  |%s|\n" % (i, length * (digits + 1), hexa, text))
 
 		return "".join(result)
 
@@ -405,18 +405,22 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 
 	if to_server:
 		msg_str = color(data_repr(message), 0, 93)
-		print("C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str))
+		print("C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str))
 
 	else:
 		msg_str = color(data_repr(message), 0, 33)
-		print("S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s\n" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str))
+		print("S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str))
 
 	return message
 
 def handle_tcp_client(client_sock, target, cfg):
-	server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	server_sock.connect(target)
-	do_relay_tcp(client_sock, server_sock, cfg)
+	try:
+		server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		server_sock.connect(target)
+		do_relay_tcp(client_sock, server_sock, cfg)
+
+	except ConnectionRefusedError as e:
+		print(color('[!] Unable to connect to server: %s' % str(e), 1, 31))
 
 def create_server(relay, cfg):
 	proto, lport, rhost, rport = relay
