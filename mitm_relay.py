@@ -107,6 +107,14 @@ def main():
 		help='Dump SSL (pre-)master secrets to <ssl keylog file>',
 		default=False)
 
+	parser.add_argument('-d', '--dump',
+		action='store',
+		metavar='<binary dump file>',
+		dest='bindumpfile',
+		type=argparse.FileType('wb'),
+		help='Dump binary data to <binary dump file>',
+		default=False)
+
 	parser.add_argument('-ct', '--client-timeout',
 		action='store',
 		metavar=1.0,
@@ -144,6 +152,7 @@ def main():
 				print(color("[!] In UDP, it's not recommended to bind to 127.0.0.1. If you see errors, try to bind to your LAN IP address instead.", 1, 31))
 
 		except:
+			cleanup(cfg)
 			sys.exit('[!] error: Invalid relay specification, see help.')
 
 	if not (cfg.cert and cfg.key):
@@ -167,6 +176,7 @@ def main():
 
 		except Exception as e:
 			print(color("[!] %s" % str(e), 1, 31))
+			cleanup(cfg)
 			sys.exit()
 
 	# If a ssl keylog file was specified, dump (pre-)master secrets
@@ -177,6 +187,7 @@ def main():
 
 		except Exception as e:
 			print(color("[!] %s" % str(e), 1, 31))
+			cleanup(cfg)
 			sys.exit()
 
 
@@ -194,6 +205,7 @@ def main():
 			time.sleep(100)
 
 		except KeyboardInterrupt:
+			cleanup(cfg)
 			sys.exit("\rExiting...")
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -404,10 +416,18 @@ def proxify(message, cfg, client_peer, server_peer, to_server=True):
 			message = new_message
 
 	if to_server:
+		if cfg.bindumpfile:
+			cfg.bindumpfile.write(message)
+			cfg.bindumpfile.flush()
+
 		msg_str = color(data_repr(message), 0, 93)
 		print("C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str))
 
 	else:
+		if cfg.bindumpfile:
+                        cfg.bindumpfile.write(message)
+                        cfg.bindumpfile.flush()
+
 		msg_str = color(data_repr(message), 0, 33)
 		print("S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str))
 
@@ -448,6 +468,10 @@ def create_server(relay, cfg):
 
 		thread = Thread(target=do_relay_udp, args=(serv, (rhost, rport), cfg))
 		thread.start()
+
+def cleanup(cfg):
+	if cfg.bindumpfile:
+		cfg.bindumpfile.close()
 
 if __name__=='__main__':
 	main()
