@@ -7,7 +7,6 @@ import os
 import requests
 import argparse
 import time
-import string
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
@@ -148,7 +147,7 @@ class MitmRelay():
 			ctx1.check_hostname = False
 			ctx1.verify_mode = ssl.CERT_NONE
 			ctx1.load_cert_chain(certfile=self.cfg.cert.name, keyfile=self.cfg.key.name)
-			tls_sock_to_client = ctx1.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, do_handshake_on_connect=False)#, suppress_ragged_eofs=False)
+			tls_sock_to_client = ctx1.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, do_handshake_on_connect=False)
 
 			ctx2 = ssl._create_unverified_context(ssl.PROTOCOL_TLS_CLIENT)
 			ctx2.check_hostname = False
@@ -157,7 +156,7 @@ class MitmRelay():
 			if self.cfg.clientcert and self.cfg.clientkey:
 				ctx2.load_cert_chain(certfile=self.cfg.clientcert.name, keyfile=self.cfg.clientkey.name)
 
-			tls_sock_to_server = ctx2.wrap_socket(server_sock, server_side=False, suppress_ragged_eofs=True, do_handshake_on_connect=False)#, suppress_ragged_eofs=False)
+			tls_sock_to_server = ctx2.wrap_socket(server_sock, server_side=False, suppress_ragged_eofs=True, do_handshake_on_connect=False)
 
 			return tls_sock_to_client, tls_sock_to_server
 
@@ -207,12 +206,8 @@ class MitmRelay():
 					data_in = self.proxify(data_in, client_peer, server_peer, to_server=False)
 					client_sock.send(data_in)
 
-			except TimeoutError as e:
+			except (socket.error, TimeoutError) as e:
 				p("[!] %s" % str(e), 1, 31)
-
-			#except socket.error as e:
-			#	p("[!] %s" % str(e), 1, 31)
-
 
 	def do_relay_udp(self, relay_sock, server):
 
@@ -237,17 +232,6 @@ class MitmRelay():
 
 	def proxify(self, message, client_peer, server_peer, to_server=True):
 
-		def get_response():
-			try:
-				host = f"{BIND_WEBSERVER[0]}:{BIND_WEBSERVER[1]}"
-				peer = f"{server_peer[0]}:{server_peer[1]}"
-				uri = 'CLIENT_REQUEST/to' if to_server else 'SERVER_RESPONSE/from'
-				response = requests.post('http://%s/%s/%s' % (host, uri, peer), proxies={'http': self.cfg.proxy}, headers=headers, data=message)
-				return response.content
-
-			except requests.exceptions.ProxyError:
-				p("[!] error: can't connect to proxy!", 1, 31)
-				return message
 		"""
 		Modify traffic here
 		Send to our own parser functions, to the proxy, or both.
