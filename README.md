@@ -5,7 +5,7 @@ Hackish way to intercept and modify non-HTTP protocols through Burp &amp; others
 
 This script is a very simple, quick and easy way to MiTM any arbitrary protocol through existing traffic interception software such as Burp Proxy or [Proxenet](https://github.com/hugsy/proxenet). It can be particularly useful for thick clients security assessments. It saves you from the pain of having to configure specific setup to intercept exotic protocols, or protocols that can't be easily intercepted. TCP and UDP are supported.
 
-STARTTLS is supported (thanks to https://github.com/ipopov/starttls-mitm), which makes it usable against protocols like XMPP, IMAP, SMTP, IRC, etc.
+STARTTLS is supported, which makes it usable against protocols like XMPP, IMAP, SMTP, IRC, etc.
 
 It's "hackish" in the way that it was specifically designed to use interception and modification capabilities of existing proxies, but for arbitrary protocols. In order to achieve that, each client request and server response is wrapped into the body of a HTTP POST request, and sent to a local dummy "echo-back" web server via the proxy. Therefore, the HTTP responses or headers that you will see in your intercepting proxy are meaningless and can be disregarded. Yet the dummy web server is necessary in order for the interception tool to get the data back and feed it back to the tool.
 
@@ -13,6 +13,10 @@ It's "hackish" in the way that it was specifically designed to use interception 
 - The responses from server to client will appear as a request to a URL containing "SERVER_RESPONSE"
 
 This way, it is completely asynchronous. Meaning that if the server sends responses in successive packets it won't be a problem.
+
+To intercept only server responses, configure your interception rules like so:
+
+![Intercept responses](https://i.imgur.com/tOmPNwG.png)
 
 "Match and Replace" rules can be used. However, using other Burp features such as repeater, intruder or scanner is pointless. That would only target the dummy webserver used to echo the data back.
 
@@ -27,46 +31,30 @@ The normal request traffic flow during typical usage would be as below:
 - You can setup multiple relays, using `-r [local port]:[dest_host]:[dest_port]`
 
 ```
-usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-s <script>]
-                     [-p <proxy>] [-c <cert>] [-k <key>] [-cc <clientcert>]
-                     [-ck <clientkey>] [-t <tls1|tls11|tls12|ssl2|ssl3>]
-                     [-sk <ssl keylog file>]
+usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-s <script>] [-p <proxy>] [-c <cert>] [-k <key>] [-cc <clientcert>] [-ck <clientkey>] [-t <timeout>]
 
-mitm_relay version 0.40
+mitm_relay version 2.50
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -l <listen>, --listen <listen>
                         Address the relays will listen on. Default: 0.0.0.0
   -r <relay> [<relay> ...], --relay <relay> [<relay> ...]
-                        Create new relays. Several relays can be created by
-                        repeating the paramter. If the protocol is omitted,
-                        TCP will be assumed. Format:
-                        [udp:|tcp:]lport:rhost:rport
+                        Create new relays. Several relays can be created by repeating the paramter. If the protocol is omitted, TCP will be assumed. Format: [udp:|tcp:]lport:rhost:rport
   -s <script>, --script <script>
-                        Python script implementing the handle_request() and
-                        handle_response() functions (see example). They will
-                        be called before forwarding traffic to the proxy, if
-                        specified.
+                        Python script implementing the handle_request() and handle_response() functions (see example). They will be called before forwarding traffic to the proxy, if specified.
   -p <proxy>, --proxy <proxy>
-                        Proxy to forward all requests/responses to. If
-                        omitted, traffic will only be printed to the console
-                        (monitoring mode unless a script is specified).
-                        Format: host:port
+                        Proxy to forward all requests/responses to. If omitted, traffic will only be printed to the console (monitoring mode unless a script is specified). Format: host:port
   -c <cert>, --cert <cert>
                         Certificate file to use for SSL/TLS interception
   -k <key>, --key <key>
                         Private key file to use for SSL/TLS interception
   -cc <clientcert>, --clientcert <clientcert>
-                        Client certificate file to use for connecting to
-                        server
+                        Client certificate file to use for connecting to server
   -ck <clientkey>, --clientkey <clientkey>
-                        Client private key file to use for connecting to
-                        server
-  -t <tls1|tls11|tls12|ssl2|ssl3>, --tlsver <tls1|tls11|tls12|ssl2|ssl3>
-                        Force SSL/TLS version
-  -sk <ssl keylog file>, --sslkeylog <ssl keylog file>
-                        Dump SSL (pre-)master secrets to <ssl keylog file>
+                        Client private key file to use for connecting to server
+  -t <timeout>, --timeout <timeout>
+                        Socket connection timeout
 ```
 
 # User scripts
