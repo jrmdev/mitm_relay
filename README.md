@@ -33,7 +33,7 @@ The normal request traffic flow during typical usage would be as below:
 ```
 usage: mitm_relay.py [-h] [-l <listen>] -r <relay> [<relay> ...] [-s <script>] [-p <proxy>] [-c <cert>] [-k <key>] [-cc <clientcert>] [-ck <clientkey>] [-t <timeout>]
 
-mitm_relay version 2.50
+mitm_relay version 3.00
 
 options:
   -h, --help            show this help message and exit
@@ -54,7 +54,8 @@ options:
   -ck <clientkey>, --clientkey <clientkey>
                         Client private key file to use for connecting to server
   -t <timeout>, --timeout <timeout>
-                        Socket connection timeout
+                        Socket receive timeout
+
 ```
 
 # User scripts

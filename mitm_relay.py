@@ -2,21 +2,18 @@
 
 import sys
 import socket
+import select
 import ssl
-import os
-import requests
 import argparse
 import time
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
-from select import select
-
-BIND_WEBSERVER = ('127.0.0.1', 49999)
-BUFSIZE = 2048
+from urllib.request import Request, urlopen
+from urllib.error import URLError
 
 __prog_name__ = 'mitm_relay'
-__version__ = 2.5
+__version__ = 3.00
 
 def p(txt, fg=32, bg=49, ret=False):
 	s = "\033[1;%d;%dm%s\033[0m" % (fg, bg, txt) if 'win' not in sys.platform else txt
@@ -47,6 +44,8 @@ class MitmRelay():
 	def __init__(self, cfg):
 
 		self.cfg = cfg
+		self.cfg.bind_ws = ('127.0.0.1', 49999)
+		self.cfg.recv_bufsize = 2048
 		self.relays = []
 
 		for r in [x[0] for x in self.cfg.relays]:
@@ -70,11 +69,20 @@ class MitmRelay():
 		# There is no point starting the local web server
 		# if we are not going to intercept the req/resp (monitor only).
 		if self.cfg.proxy:
+			
 			if 'http://' not in self.cfg.proxy:
 				self.cfg.proxy = 'http://%s' % self.cfg.proxy
+
+			self.cfg.ws_host = f"{self.cfg.bind_ws[0]}:{self.cfg.bind_ws[1]}"
+			self.cfg.ws_req = Request('http://')
+			self.cfg.ws_req.set_proxy(self.cfg.proxy, 'http')
+			self.cfg.ws_req.has_header = lambda x: True
 			self.start_ws()
+
+			p("[i] Client <> Server communications will be relayed via proxy %s" % self.cfg.proxy, 0, 32)
+
 		else:
-			p("[!] Interception disabled! %s will run in monitoring mode only." % __prog_name__, 0, 31)
+			p("[i] Proxy not specified! %s will run in monitoring mode only." % __prog_name__, 0, 32)
 
 		# If a script was specified, import it
 		if self.cfg.script:
@@ -86,14 +94,14 @@ class MitmRelay():
 				p("[!] %s" % str(e), 1, 31)
 				sys.exit()
 
+	def start(self):
 		server_threads = []
 		for relay in self.relays:
 			t = Thread(target=self.create_server, args=(relay, ))
+			t.daemon = True
 			server_threads.append(t)
 
-		for t in server_threads:
-			t.daemon = True
-			t.start()
+		[t.start() for t in server_threads]
 
 		while True:
 			try:
@@ -117,15 +125,14 @@ class MitmRelay():
 			return "".join(result)
 
 		try:
-			data = data.decode("ascii")
-			return '\n'+data
+			return '\n'+data.decode("ascii")
 
 		except:
 			return '\n'+hexdump(data)
 
 	def start_ws(self):
-		print('[+] Webserver listening on', BIND_WEBSERVER)
-		server = HTTPServer(BIND_WEBSERVER, RequestHandler)
+		p('[i] Webserver listening on %s:%d' % self.cfg.bind_ws, 0, 32)
+		server = HTTPServer(self.cfg.bind_ws, RequestHandler)
 
 		try:
 			t = Thread(target=server.serve_forever)
@@ -138,29 +145,36 @@ class MitmRelay():
 	def wrap_sockets(self, client_sock, server_sock):
 
 		if not (self.cfg.cert and self.cfg.key):
-			p("[!] SSL/TLS handshake detected, provide a server cert and key to enable interception.", 1, 31)
+			p("[!] SSL/TLS handshake detected, provide a server cert and key to enable interception.", 0, 31)
+			return client_sock, server_sock
 		
-		else:
+		try:
 			p('---------------------- Wrapping sockets ----------------------', 1, 32)
 
-			ctx1 = ssl._create_unverified_context(ssl.PROTOCOL_TLS_SERVER)
-			ctx1.check_hostname = False
-			ctx1.verify_mode = ssl.CERT_NONE
-			ctx1.load_cert_chain(certfile=self.cfg.cert.name, keyfile=self.cfg.key.name)
-			tls_sock_to_client = ctx1.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, do_handshake_on_connect=False)
+			# Wrapping mitm_relay listener socket to client
+			client_ctx = ssl._create_unverified_context(ssl.PROTOCOL_TLS_SERVER)
+			client_ctx.check_hostname = False
+			client_ctx.verify_mode = ssl.CERT_NONE
+			client_ctx.load_cert_chain(certfile=self.cfg.cert.name, keyfile=self.cfg.key.name)
 
-			ctx2 = ssl._create_unverified_context(ssl.PROTOCOL_TLS_CLIENT)
-			ctx2.check_hostname = False
-			ctx2.verify_mode = ssl.CERT_NONE
+			tls_sock_to_client = client_ctx.wrap_socket(client_sock, server_side=True, suppress_ragged_eofs=True, do_handshake_on_connect=True)
+
+			# wrapping mitm_relay client socket to server
+			server_ctx = ssl._create_unverified_context(ssl.PROTOCOL_TLS_CLIENT)
+			server_ctx.check_hostname = False
+			server_ctx.verify_mode = ssl.CERT_NONE
 			
 			if self.cfg.clientcert and self.cfg.clientkey:
-				ctx2.load_cert_chain(certfile=self.cfg.clientcert.name, keyfile=self.cfg.clientkey.name)
+				server_ctx.load_cert_chain(certfile=self.cfg.clientcert.name, keyfile=self.cfg.clientkey.name)
 
-			tls_sock_to_server = ctx2.wrap_socket(server_sock, server_side=False, suppress_ragged_eofs=True, do_handshake_on_connect=False)
+			tls_sock_to_server = server_ctx.wrap_socket(server_sock, server_side=False, suppress_ragged_eofs=True, do_handshake_on_connect=True)
+			tls_sock_to_server.setblocking(0)
 
 			return tls_sock_to_client, tls_sock_to_server
 
-		return client_sock, server_sock
+		except ssl.SSLError as e:
+			p("[!] %s" % str(e), 1, 31)
+			sys.exit(1)
 
 	def do_relay_tcp(self, client_sock, server_sock):
 		server_sock.settimeout(self.cfg.timeout)
@@ -171,23 +185,20 @@ class MitmRelay():
 
 		while True:
 
-			receiving, x, y = select([client_sock, server_sock], [], [])
+			receiving, x, y = select.select([client_sock, server_sock], [], [])
+
+			# Peek for the beginning of a TLS session
+			if client_sock in receiving and not isinstance(client_sock, ssl.SSLSocket) and client_sock.recv(2, socket.MSG_PEEK) == b'\x16\x03':
+				client_sock, server_sock = self.wrap_sockets(client_sock, server_sock)
 
 			try:
 				if client_sock in receiving:
 
-					# Peek for the beginning of a TLS session
-					if not isinstance(client_sock, ssl.SSLSocket):
-						peek = client_sock.recv(BUFSIZE, socket.MSG_PEEK)
-						if peek.startswith(b'\x16\x03'):
-							client_sock, server_sock = self.wrap_sockets(client_sock, server_sock)
-
-					data_out = client_sock.recv(BUFSIZE)
+					data_out = client_sock.recv(self.cfg.recv_bufsize)
 
 					if not len(data_out):
 						print("[+] Client disconnected", client_peer)
-						client_sock.close()
-						server_sock.close()
+						server_sock.shutdown(1)
 						break
 
 					data_out = self.proxify(data_out, client_peer, server_peer, to_server=True)
@@ -195,18 +206,20 @@ class MitmRelay():
 
 				if server_sock in receiving:
 
-					data_in = server_sock.recv(BUFSIZE)
+					data_in = server_sock.recv(self.cfg.recv_bufsize)
 
 					if not len(data_in):
 						print("[+] Server disconnected", server_peer)
-						client_sock.close()
-						server_sock.close()
+						client_sock.shutdown(1)
 						break
 
 					data_in = self.proxify(data_in, client_peer, server_peer, to_server=False)
 					client_sock.send(data_in)
 
-			except (socket.error, TimeoutError) as e:
+			except ssl.SSLWantReadError:
+				pass
+
+			except (ConnectionResetError, TimeoutError) as e:
 				p("[!] %s" % str(e), 1, 31)
 
 	def do_relay_udp(self, relay_sock, server):
@@ -215,11 +228,11 @@ class MitmRelay():
 
 		while True:
 
-			receiving, _, _ = select([relay_sock], [], [])
+			receiving, _, _ = select.select([relay_sock], [], [])
 
 			if relay_sock in receiving:
 
-				data, addr = relay_sock.recvfrom(BUFSIZE)
+				data, addr = relay_sock.recvfrom(self.cfg.recv_bufsize)
 
 				if addr == server:
 					data = self.proxify(data, client, server, to_server=False)
@@ -232,82 +245,66 @@ class MitmRelay():
 
 	def proxify(self, message, client_peer, server_peer, to_server=True):
 
+		orig_message = message
+
 		"""
-		Modify traffic here
-		Send to our own parser functions, to the proxy, or both.
+		Modify traffic here by modifying the 'message' variable.
+		Optionally, send it to our own parser functions, to the proxy, or both.
+
+		message = message.replace(b'example.com', b'mysite.com')
 		"""
 
 		server_str = p('%s:%d' % server_peer, 1, 34, True)
 		client_str = p('%s:%d' % client_peer, 1, 36, True)
 		date_str = p(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 1, 35, True)
 		modified_str = p('(modified!)', 1, 32, True)
-		modified = False
 
 		if self.cfg.script:
-			new_message = message
 
 			if to_server and hasattr(cfg.script_module, 'handle_request'):
-				new_message = cfg.script_module.handle_request(message)
+				message = cfg.script_module.handle_request(message)
 
 			if not to_server and hasattr(cfg.script_module, 'handle_response'):
-				new_message = cfg.script_module.handle_response(message)
+				message = cfg.script_module.handle_response(message)
 
-			if new_message == None:
+			if message == None:
 				p("[!] Error: make sure handle_request and handle_response both return a message.", 1, 31)
-				new_message = message
-
-			if new_message != message:
-				modified = True
-				message = new_message
+				message = orig_message
 
 		if self.cfg.proxy:
-			headers = {u'User-Agent': None, u'Accept': None, u'Accept-Encoding': None, u'Connection': None}
-			host = f"{BIND_WEBSERVER[0]}:{BIND_WEBSERVER[1]}"
 			peer = f"{server_peer[0]}:{server_peer[1]}"
 			uri = 'CLIENT_REQUEST/to' if to_server else 'SERVER_RESPONSE/from'
 
 			try:
-				response = requests.post('http://%s/%s/%s' % (host, uri, peer), proxies={'http': self.cfg.proxy}, headers=headers, data=message)
-				new_message = response.content
+				self.cfg.ws_req.full_url = 'http://%s/%s/%s' % (self.cfg.ws_host, uri, peer)
+				self.cfg.ws_req.data = message
 
-			except requests.exceptions.ProxyError:
-				p("[!] error: can't connect to proxy!", 1, 31)
-				return
-
-			if new_message != message:
-				modified = True
-				message = new_message
+				with urlopen(self.cfg.ws_req) as u:
+					message = u.read()
+			
+			except URLError as e:
+				p("[!] Could not connect to proxy: %s" % str(e), 1, 31)
+				sys.exit(1)
 
 		if to_server:
 			msg_str = p(self.data_repr(message), 0, 93, True)
-			print("C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s" % (client_str, server_str, date_str, len(message), modified_str if modified else '', msg_str))
+			print("C >> S [ %s >> %s ] [ %s ] [ %d ] %s %s" % (client_str, server_str, date_str, len(message), modified_str if message != orig_message else '', msg_str))
 
 		else:
 			msg_str = p(self.data_repr(message), 0, 33, True)
-			print("S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s" % (server_str, client_str, date_str, len(message), modified_str if modified else '', msg_str))
+			print("S >> C [ %s >> %s ] [ %s ] [ %d ] %s %s" % (server_str, client_str, date_str, len(message), modified_str if message != orig_message else '', msg_str))
 
 		return message
-
-	def handle_tcp_client(self, client_sock, target):
-		try:
-			# The client sock is actually a server (mitm_relay listener)
-			# The server sock is actually a client (socket to dest server)
-			server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			server_sock.connect(target)
-			self.do_relay_tcp(client_sock, server_sock)
-
-		except ConnectionRefusedError as e:
-			p('[!] Unable to connect to server: %s' % str(e), 1, 31)
 
 	def create_server(self, relay):
 		proto, lport, rhost, rport = relay
 
 		if proto == 'tcp':
 			try:
-				serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-				serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-				serv.bind((self.cfg.listen, lport))
-				serv.listen(2)
+				relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				relay_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				relay_sock.bind((self.cfg.listen, lport))
+				relay_sock.listen(2)
 			except OSError as e:
 				p('[!] Error: %s:%d %s' % (self.cfg.listen, lport, str(e)), 1, 31)
 				return
@@ -315,18 +312,31 @@ class MitmRelay():
 			print('[+] Relay listening on %s %d -> %s:%d' % relay)
 
 			while True:
-				client, addr = serv.accept()
-				dest_str = '%s:%d' % (relay[2], relay[3])
+				sock_to_client, addr = relay_sock.accept()
 
-				p('[+] New client %s:%d will be relayed to %s' % (addr[0], addr[1], dest_str), 1, 39)
-				thread = Thread(target=self.handle_tcp_client, args=(client, (rhost, rport)))
-				thread.start()
+				p('[+] New client %s:%d will be relayed to %s:%d' % (addr[0], addr[1], relay[2], relay[3]), 1, 39)
+
+				try:
+					sock_to_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+					sock_to_server.connect((rhost, rport))
+
+				except (socket.gaierror, ConnectionRefusedError) as e:
+					p('[!] Unable to connect to server: %s' % str(e), 1, 31)
+
+				else:
+					thread = Thread(target=self.do_relay_tcp, args=(sock_to_client, sock_to_server))
+					thread.daemon = True
+					thread.start()
+
 		else:
-			serv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-			serv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			serv.bind((self.cfg.listen, lport))
+			relay_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+			relay_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+			relay_sock.bind((self.cfg.listen, lport))
 
-			thread = Thread(target=self.do_relay_udp, args=(serv, (rhost, rport)))
+			print('[+] Relay listening on %s %d -> %s:%d' % relay)
+
+			thread = Thread(target=self.do_relay_udp, args=(relay_sock, (rhost, rport)))
+			thread.daemon = True
 			thread.start()
 
 if __name__ == "__main__":
@@ -408,10 +418,11 @@ if __name__ == "__main__":
 		metavar='<timeout>',
 		dest='timeout',
 		type=int,
-		help='Socket connection timeout',
+		help='Socket receive timeout',
 		default=3.0)
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
 
-	relay = MitmRelay(cfg)
+	mitm_relay = MitmRelay(cfg)
+	mitm_relay.start()
