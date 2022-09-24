@@ -6,10 +6,10 @@ import select
 import ssl
 import argparse
 import time
+import urllib.request
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
-from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 __prog_name__ = 'mitm_relay'
@@ -73,8 +73,12 @@ class MitmRelay():
 			if 'http://' not in self.cfg.proxy:
 				self.cfg.proxy = 'http://%s' % self.cfg.proxy
 
+			handler = urllib.request.ProxyHandler({"http": self.cfg.proxy})
+			opener = urllib.request.build_opener(handler)
+			urllib.request.install_opener(opener)
+			
 			self.cfg.ws_host = f"{self.cfg.bind_ws[0]}:{self.cfg.bind_ws[1]}"
-			self.cfg.ws_req = Request('http://')
+			self.cfg.ws_req = urllib.request.Request('http://')
 			self.cfg.ws_req.set_proxy(self.cfg.proxy, 'http')
 			self.cfg.ws_req.has_header = lambda x: True
 			self.start_ws()
@@ -279,7 +283,7 @@ class MitmRelay():
 				self.cfg.ws_req.full_url = 'http://%s/%s/%s' % (self.cfg.ws_host, uri, peer)
 				self.cfg.ws_req.data = message
 
-				with urlopen(self.cfg.ws_req) as u:
+				with urllib.request.urlopen(self.cfg.ws_req) as u:
 					message = u.read()
 			
 			except URLError as e:
