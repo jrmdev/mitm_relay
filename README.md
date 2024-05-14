@@ -55,6 +55,8 @@ options:
                         Client private key file to use for connecting to server
   -t <timeout>, --timeout <timeout>
                         Socket receive timeout
+  -sk <ssl keylog file>, --sslkeylog <ssl keylog file>
+                        Dump SSL (pre-)master secrets to <ssl keylog file>
 
 ```
 

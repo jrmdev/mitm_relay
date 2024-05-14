@@ -98,6 +98,16 @@ class MitmRelay():
 				p("[!] %s" % str(e), 1, 31)
 				sys.exit()
 
+		# If an sslkeylog file was specified, enable pre-master secret dumping
+		if self.cfg.sslkeylog:
+			try:
+				import sslkeylog
+				sslkeylog.set_keylog(cfg.sslkeylog)
+			
+			except Exception as e:
+				p("[!] %s" % str(e), 1, 31)
+				sys.exit()
+
 	def start(self):
 		server_threads = []
 		for relay in self.relays:
@@ -424,6 +434,14 @@ if __name__ == "__main__":
 		type=int,
 		help='Socket receive timeout',
 		default=3.0)
+
+	parser.add_argument('-sk', '--sslkeylog',
+		action='store',
+		metavar='<ssl keylog file>',
+		dest='sslkeylog',
+		type=argparse.FileType('a'),
+		help='Dump SSL (pre-)master secrets to <ssl keylog file>',
+		default=False)
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
