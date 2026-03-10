@@ -11,9 +11,11 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 from urllib.error import URLError
+from urllib.parse import urlsplit
 
 __prog_name__ = 'mitm_relay'
 __version__ = 3.00
+__webserver_port__ = 49999
 
 def p(txt, fg=32, bg=49, ret=False):
 	s = "\033[1;%d;%dm%s\033[0m" % (fg, bg, txt) if 'win' not in sys.platform else txt
@@ -44,23 +46,15 @@ class MitmRelay():
 	def __init__(self, cfg):
 
 		self.cfg = cfg
-		self.cfg.bind_ws = ('127.0.0.1', 49999)
+		self.cfg.bind_ws = (self.cfg.webserver_bind, __webserver_port__)
 		self.cfg.recv_bufsize = 2048
 		self.relays = []
 
-		for r in [x[0] for x in self.cfg.relays]:
-			r = r.split(':')
+		for relay_spec in self.iter_relay_specs():
+			relay = self.parse_relay_spec(relay_spec)
+			self.relays.append(relay)
 
-			if len(r) == 3:
-				self.relays.append(('tcp', int(r[0]), r[1], int(r[2])))
-
-			elif len(r) == 4 and r[0] in ['tcp', 'udp']:
-				self.relays.append((r[0], int(r[1]), r[2], int(r[3])))
-
-			else:
-				raise ValueError("Invalid relay specification")
-
-			if r[0] == 'udp' and self.cfg.listen.startswith('127.0.0'):
+			if relay[0] == 'udp' and self.cfg.listen.startswith('127.0.0'):
 				p("[!] In UDP, it's not recommended to bind to 127.0.0.1. If you see errors, try to bind to your LAN IP address instead.", 1, 31)
 
 		if not (self.cfg.cert and self.cfg.key):
@@ -69,21 +63,12 @@ class MitmRelay():
 		# There is no point starting the local web server
 		# if we are not going to intercept the req/resp (monitor only).
 		if self.cfg.proxy:
-			
-			if 'http://' not in self.cfg.proxy:
-				self.cfg.proxy = 'http://%s' % self.cfg.proxy
+			self.cfg.proxy_url, self.cfg.proxy_host, self.cfg.proxy_type = self.normalize_proxy(self.cfg.proxy)
 
-			handler = urllib.request.ProxyHandler({"http": self.cfg.proxy})
-			opener = urllib.request.build_opener(handler)
-			urllib.request.install_opener(opener)
-			
 			self.cfg.ws_host = f"{self.cfg.bind_ws[0]}:{self.cfg.bind_ws[1]}"
-			self.cfg.ws_req = urllib.request.Request('http://')
-			self.cfg.ws_req.set_proxy(self.cfg.proxy, 'http')
-			self.cfg.ws_req.has_header = lambda x: True
 			self.start_ws()
 
-			p("[i] Client <> Server communications will be relayed via proxy %s" % self.cfg.proxy, 0, 32)
+			p("[i] Client <> Server communications will be relayed via proxy %s" % self.cfg.proxy_url, 0, 32)
 
 		else:
 			p("[i] Proxy not specified! %s will run in monitoring mode only." % __prog_name__, 0, 32)
@@ -98,6 +83,31 @@ class MitmRelay():
 				p("[!] %s" % str(e), 1, 31)
 				sys.exit()
 
+	def iter_relay_specs(self):
+		for relay_group in self.cfg.relays:
+			for relay_spec in relay_group:
+				yield relay_spec
+
+	def parse_relay_spec(self, relay_spec):
+		relay_parts = relay_spec.split(':')
+
+		if len(relay_parts) == 3:
+			return ('tcp', int(relay_parts[0]), relay_parts[1], int(relay_parts[2]))
+
+		if len(relay_parts) == 4 and relay_parts[0] in ['tcp', 'udp']:
+			return (relay_parts[0], int(relay_parts[1]), relay_parts[2], int(relay_parts[3]))
+
+		raise ValueError("Invalid relay specification")
+
+	def normalize_proxy(self, proxy):
+		proxy_url = proxy if '://' in proxy else 'http://%s' % proxy
+		parsed = urlsplit(proxy_url)
+
+		if not parsed.scheme or not parsed.netloc:
+			raise ValueError("Invalid proxy specification")
+
+		return proxy_url, parsed.netloc, parsed.scheme
+
 	def start(self):
 		server_threads = []
 		for relay in self.relays:
@@ -105,7 +115,8 @@ class MitmRelay():
 			t.daemon = True
 			server_threads.append(t)
 
-		[t.start() for t in server_threads]
+		for thread in server_threads:
+			thread.start()
 
 		while True:
 			try:
@@ -180,6 +191,40 @@ class MitmRelay():
 			p("[!] %s" % str(e), 1, 31)
 			sys.exit(1)
 
+	def close_socket(self, sock):
+		try:
+			sock.shutdown(socket.SHUT_RDWR)
+		except OSError:
+			pass
+
+		try:
+			sock.close()
+		except OSError:
+			pass
+
+	def close_connection(self, *sockets):
+		for sock in sockets:
+			if sock is not None:
+				self.close_socket(sock)
+
+	def send_all(self, sock, data):
+		if data:
+			sock.sendall(data)
+
+	def format_peer(self, peer):
+		if peer is None:
+			return 'unknown'
+
+		return '%s:%d' % peer
+
+	def build_proxy_request(self, message, server_peer, to_server):
+		peer = self.format_peer(server_peer)
+		uri = 'CLIENT_REQUEST/to' if to_server else 'SERVER_RESPONSE/from'
+		request = urllib.request.Request('http://%s/%s/%s' % (self.cfg.ws_host, uri, peer), data=message)
+		request.set_proxy(self.cfg.proxy_host, self.cfg.proxy_type)
+		request.has_header = lambda x: True
+		return request
+
 	def do_relay_tcp(self, client_sock, server_sock):
 		server_sock.settimeout(self.cfg.timeout)
 		client_sock.settimeout(self.cfg.timeout)
@@ -189,24 +234,27 @@ class MitmRelay():
 
 		while True:
 
-			receiving, x, y = select.select([client_sock, server_sock], [], [])
-
-			# Peek for the beginning of a TLS session
-			if client_sock in receiving and not isinstance(client_sock, ssl.SSLSocket) and client_sock.recv(2, socket.MSG_PEEK) == b'\x16\x03':
-				client_sock, server_sock = self.wrap_sockets(client_sock, server_sock)
-
 			try:
+				receiving, _, _ = select.select([client_sock, server_sock], [], [], self.cfg.timeout)
+
+				if not receiving:
+					raise socket.timeout('timed out')
+
+				# Peek for the beginning of a TLS session
+				if client_sock in receiving and not isinstance(client_sock, ssl.SSLSocket) and client_sock.recv(2, socket.MSG_PEEK) == b'\x16\x03':
+					client_sock, server_sock = self.wrap_sockets(client_sock, server_sock)
+					continue
+
 				if client_sock in receiving:
 
 					data_out = client_sock.recv(self.cfg.recv_bufsize)
 
 					if not len(data_out):
 						print("[+] Client disconnected", client_peer)
-						server_sock.shutdown(1)
 						break
 
 					data_out = self.proxify(data_out, client_peer, server_peer, to_server=True)
-					server_sock.send(data_out)
+					self.send_all(server_sock, data_out)
 
 				if server_sock in receiving:
 
@@ -214,17 +262,19 @@ class MitmRelay():
 
 					if not len(data_in):
 						print("[+] Server disconnected", server_peer)
-						client_sock.shutdown(1)
 						break
 
 					data_in = self.proxify(data_in, client_peer, server_peer, to_server=False)
-					client_sock.send(data_in)
+					self.send_all(client_sock, data_in)
 
 			except ssl.SSLWantReadError:
 				pass
 
-			except (ConnectionResetError, TimeoutError) as e:
+			except (BrokenPipeError, ConnectionResetError, OSError, socket.timeout, TimeoutError) as e:
 				p("[!] %s" % str(e), 1, 31)
+				break
+
+		self.close_connection(client_sock, server_sock)
 
 	def do_relay_udp(self, relay_sock, server):
 
@@ -239,6 +289,9 @@ class MitmRelay():
 				data, addr = relay_sock.recvfrom(self.cfg.recv_bufsize)
 
 				if addr == server:
+					if client is None:
+						continue
+
 					data = self.proxify(data, client, server, to_server=False)
 					relay_sock.sendto(data, client)
 
@@ -258,32 +311,26 @@ class MitmRelay():
 		message = message.replace(b'example.com', b'mysite.com')
 		"""
 
-		server_str = p('%s:%d' % server_peer, 1, 34, True)
-		client_str = p('%s:%d' % client_peer, 1, 36, True)
+		server_str = p(self.format_peer(server_peer), 1, 34, True)
+		client_str = p(self.format_peer(client_peer), 1, 36, True)
 		date_str = p(time.strftime("%a %d %b %H:%M:%S", time.gmtime()), 1, 35, True)
 		modified_str = p('(modified!)', 1, 32, True)
 
 		if self.cfg.script:
 
-			if to_server and hasattr(cfg.script_module, 'handle_request'):
-				message = cfg.script_module.handle_request(message)
+			if to_server and hasattr(self.cfg.script_module, 'handle_request'):
+				message = self.cfg.script_module.handle_request(message)
 
-			if not to_server and hasattr(cfg.script_module, 'handle_response'):
-				message = cfg.script_module.handle_response(message)
+			if not to_server and hasattr(self.cfg.script_module, 'handle_response'):
+				message = self.cfg.script_module.handle_response(message)
 
 			if message == None:
 				p("[!] Error: make sure handle_request and handle_response both return a message.", 1, 31)
 				message = orig_message
 
 		if self.cfg.proxy:
-			peer = f"{server_peer[0]}:{server_peer[1]}"
-			uri = 'CLIENT_REQUEST/to' if to_server else 'SERVER_RESPONSE/from'
-
 			try:
-				self.cfg.ws_req.full_url = 'http://%s/%s/%s' % (self.cfg.ws_host, uri, peer)
-				self.cfg.ws_req.data = message
-
-				with urllib.request.urlopen(self.cfg.ws_req) as u:
+				with urllib.request.urlopen(self.build_proxy_request(message, server_peer, to_server)) as u:
 					message = u.read()
 			
 			except URLError as e:
@@ -326,6 +373,7 @@ class MitmRelay():
 
 				except (socket.gaierror, ConnectionRefusedError) as e:
 					p('[!] Unable to connect to server: %s' % str(e), 1, 31)
+					self.close_connection(sock_to_client, sock_to_server)
 
 				else:
 					thread = Thread(target=self.do_relay_tcp, args=(sock_to_client, sock_to_server))
@@ -333,9 +381,13 @@ class MitmRelay():
 					thread.start()
 
 		else:
-			relay_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-			relay_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			relay_sock.bind((self.cfg.listen, lport))
+			try:
+				relay_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+				relay_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				relay_sock.bind((self.cfg.listen, lport))
+			except OSError as e:
+				p('[!] Error: %s:%d %s' % (self.cfg.listen, lport, str(e)), 1, 31)
+				return
 
 			print('[+] Relay listening on %s %d -> %s:%d' % relay)
 
@@ -343,8 +395,7 @@ class MitmRelay():
 			thread.daemon = True
 			thread.start()
 
-if __name__ == "__main__":
-
+def build_parser():
 	parser = argparse.ArgumentParser(description='%s version %.2f' % (__prog_name__, __version__))
 
 	parser.add_argument('-l', '--listen',
@@ -423,7 +474,20 @@ if __name__ == "__main__":
 		dest='timeout',
 		type=int,
 		help='Socket receive timeout',
-		default=3.0)
+		default=120)
+
+	parser.add_argument('--webserver-bind',
+		action='store',
+		metavar='<addr>',
+		dest='webserver_bind',
+		help='Address the internal webserver will bind on. Useful if the proxy is on a different host. Default: 127.0.0.1',
+		default='127.0.0.1')
+
+	return parser
+
+if __name__ == "__main__":
+
+	parser = build_parser()
 
 	cfg = parser.parse_args()
 	cfg.prog_name = __prog_name__
